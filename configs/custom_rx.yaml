@@ -1,0 +1,40 @@
+# Custom-receiver scenario (uses components registered by examples/plugins/custom_rx.py)
+# NOTE: import the plugin first so the names below exist in the registry, e.g.
+#   python -c "import sys; sys.path.insert(0,'.'); import examples.plugins.custom_rx as p; print(p.registry.names('detector'))"
+snr_db: [0, 2, 4, 6, 8, 10, 12, 14, 16, 18]
+num_trials: 256
+batch_size: 128
+device: auto
+seed: 11
+
+carrier:
+  subcarrier_spacing: 30.0
+  n_size_grid: 4
+  n_cell_id: 1
+
+pusch:
+  num_layers: 2
+  num_antenna_ports: 2
+  mapping_type: "A"
+  symbol_start: 0
+  symbol_length: 14
+  precoding: "non-codebook"
+
+tb:
+  mcs_index: 12
+  mcs_table: 1
+
+channel:
+  channel_type: "tdl"
+  model: "C"
+  delay_spread: 100e-9
+  carrier_frequency: 3.5e9
+  min_speed: 0.0
+  max_speed: 1.0
+  num_rx_ant: 2
+
+receiver:
+  channel_estimator: "ls_avg"   # custom (registered) | "ls" | "perfect"
+  mimo_detector: "mf"           # custom (registered) | "lmmse" | "zf"
+  tb_decoder: "default"
+  num_demod_iter: null

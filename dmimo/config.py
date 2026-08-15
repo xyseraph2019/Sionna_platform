@@ -1,0 +1,146 @@
+"""YAML config support for the DMIMO platforms (link-level and system-level)."""
+from __future__ import annotations
+
+import math
+from dataclasses import dataclass, field
+from typing import List, Optional, Tuple
+
+import yaml
+
+
+@dataclass
+class DMIMOConfig:
+    channel_kind: str = "uma"                 # simple|tdl|cdl|uma|umi
+    num_trps: int = 3
+    num_tx_ant: int = 4
+    num_ue_ant: int = 1
+    n_subcarriers: int = 64
+    subcarrier_spacing_khz: float = 30.0
+    carrier_frequency: float = 3.5e9
+    pathloss: bool = False
+    trp_distances_m: Tuple[float, ...] = (100.0, 200.0, 350.0)
+    tau_ns: Tuple[float, ...] = (0.0, 130.0, 260.0)
+    cal_amp_error: float = 0.1                # None -> no calibration error
+    cal_pha_error: float = 0.1
+    granularity: str = "SC"                   # SC|RB|SC_RB_granular
+    subband_size: int = 12                    # CJT 与 NN-PMI 统一预编码粒度（子载波/子带）
+    rank: int = 1
+    qam_order: int = 16
+    code_rate: float = 0.5
+    use_channel_estimation: bool = False      # P1: DMRS-based LS channel estimation
+    est_density: float = 0.5                  # P1: DMRS comb density in the DMRS symbol (pilots/subcarrier)
+    pilot_boost_db: float = 0.0               # P1: DMRS pilot energy boost (dB) vs a data symbol
+    n_symbols: int = 14                       # P1: OFDM symbols per slot (time-frequency grid)
+    dmrs_symbol: int = 2                      # P1: front-loaded pilot-only DMRS symbol index
+    num_dmrs_symbols: int = 1                 # P1: number of pilot-only DMRS symbols
+    use_crc: bool = True                      # P2: 5G NR TB encoder/decoder + TB CRC BLER
+    precoder: str = "all"                     # mrt|cjt|type1|all|nn
+    nn_pmi_ckpt: Optional[str] = None         # path to trained NN-PMI model; None -> NN-PMI disabled
+    snr_db: Optional[List[float]] = None      # explicit SNR list (dB); None -> snr_start/stop/step
+    snr_start_db: float = -24.0               # SNR sweep range (dB)
+    snr_stop_db: float = -2.0
+    snr_step_db: float = 2.0
+    num_trials: int = 256
+    device: str = "auto"
+    seed: int = 0
+
+    @property
+    def snr_grid(self) -> List[float]:
+        """SNR sweep points in dB.
+
+        Uses the explicit ``snr_db`` list when given; otherwise builds the
+        arithmetic range ``snr_start_db, +snr_step_db, ..., <= snr_stop_db``.
+        """
+        if self.snr_db is not None:
+            return list(self.snr_db)
+        if self.snr_step_db <= 0:
+            raise ValueError("snr_step_db must be > 0.")
+        n = max(int(math.floor((self.snr_stop_db - self.snr_start_db) / self.snr_step_db + 1e-9)) + 1, 1)
+        return [round(self.snr_start_db + i * self.snr_step_db, 6) for i in range(n)]
+
+    @property
+    def tau_seconds(self) -> Tuple[float, ...]:
+        return tuple(t * 1e-9 for t in self.tau_ns)
+
+    def build_link(self):
+        """Build a :class:`~dmimo.link.DMIMODownlink` from this config."""
+        from .experiment import build_link
+
+        return build_link(num_trps=self.num_trps, num_tx_ant=self.num_tx_ant,
+                          num_ue_ant=self.num_ue_ant, n_subcarriers=self.n_subcarriers,
+                          subcarrier_spacing=self.subcarrier_spacing_khz * 1e3,
+                          tau_seconds=self.tau_seconds,
+                          cal_amp_error=self.cal_amp_error, cal_pha_error=self.cal_pha_error,
+                          granularity=self.granularity, channel_kind=self.channel_kind,
+                          pathloss=self.pathloss, trp_distances=self.trp_distances_m,
+                          carrier_frequency=self.carrier_frequency)
+
+
+def _coerce(name, v):
+    if name in ("trp_distances_m", "tau_ns"):
+        try:
+            return tuple(float(x) for x in v)
+        except (TypeError, ValueError):
+            return v
+    if name == "snr_db":
+        try:
+            return [float(x) for x in v]
+        except (TypeError, ValueError):
+            return v
+    if name in ("num_trps", "num_tx_ant", "num_ue_ant", "n_subcarriers", "qam_order", "rank",
+                "n_symbols", "dmrs_symbol", "num_dmrs_symbols", "num_trials", "seed",
+                "subband_size"):
+        try:
+            return int(v)
+        except (TypeError, ValueError):
+            return v
+    if name in ("subcarrier_spacing_khz", "carrier_frequency", "cal_amp_error", "cal_pha_error",
+                "code_rate", "est_density", "pilot_boost_db",
+                "snr_start_db", "snr_stop_db", "snr_step_db"):
+        try:
+            return float(v)
+        except (TypeError, ValueError):
+            return v
+    if name in ("use_channel_estimation", "use_crc"):
+        if isinstance(v, str):
+            return v.strip().lower() in ("1", "true", "yes", "on")
+        return bool(v)
+    return v
+
+
+def load_dmimo_config(path: str) -> DMIMOConfig:
+    """Load a :class:`DMIMOConfig` from a YAML file (numeric fields coerced)."""
+    with open(path, "r", encoding="utf-8") as fh:
+        raw = yaml.safe_load(fh) or {}
+    cfg = DMIMOConfig()
+    for name, f in DMIMOConfig.__dataclass_fields__.items():
+        if name in raw and raw[name] is not None:
+            setattr(cfg, name, _coerce(name, raw[name]))
+    return cfg
+
+
+def scenario_tag(num_trps, rank, n_subcarriers, qam_order, code_rate,
+                 channel_kind="uma", est=False, num_dmrs_symbols=1,
+                 err=False, subband_size=None, pathloss=False) -> str:
+    """Compact scenario tag for result-file names (filename == metadata).
+
+    Example (3 TRPs, rank 2, 240 SC, 16-QAM, rate 0.5, UMa, LS estimation with
+    2 DMRS symbols, calibration errors on)::
+
+        '3trp_rank2_240sc_qam16_r050_uma_est2dmrs_err'
+
+    Every result file (BLER figure, NN model checkpoint, dataset) should embed
+    this tag so its scenario is self-describing.
+    """
+    tag = (f"{int(num_trps)}trp_rank{int(rank)}_{int(n_subcarriers)}sc_"
+           f"qam{int(qam_order)}_r{float(code_rate):.2f}").replace(".", "")
+    tag += f"_{channel_kind}"
+    if pathloss:
+        tag += "_pl"
+    if est:
+        tag += f"_est{int(num_dmrs_symbols)}dmrs"
+    if err:
+        tag += "_err"
+    if subband_size:
+        tag += f"_sub{int(subband_size)}"
+    return tag

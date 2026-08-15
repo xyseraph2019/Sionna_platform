@@ -1,0 +1,31 @@
+# 3GPP TR38.901 TDL-C channel, 16-QAM single-layer link
+snr_db: [-4, -2, 0, 2, 4, 6, 8, 10, 12, 14, 16]
+num_trials: 200
+batch_size: 32
+device: auto  # auto = cuda:0 if available, else cpu
+seed: 11
+
+carrier:
+  subcarrier_spacing: 30.0
+  n_size_grid: 4
+  n_cell_id: 1
+
+pusch:
+  num_layers: 1
+  num_antenna_ports: 1
+  mapping_type: "A"
+  symbol_start: 0
+  symbol_length: 14
+  precoding: "non-codebook"
+
+tb:
+  mcs_index: 12         # 16-QAM, mid rate
+  mcs_table: 1
+
+channel:
+  channel_type: "tdl"
+  model: "C"
+  delay_spread: 100e-9
+  carrier_frequency: 3.5e9
+  min_speed: 0.0
+  max_speed: 3.0

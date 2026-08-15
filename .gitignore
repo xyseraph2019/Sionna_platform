@@ -1,0 +1,49 @@
+# --- Python ---
+__pycache__/
+*.py[cod]
+*.so
+*.egg-info/
+.eggs/
+build/
+dist/
+*.egg
+
+# --- Environments / tools ---
+.venv/
+venv/
+env/
+.conda/
+.ipynb_checkpoints/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+.coverage
+htmlcov/
+*.cover
+.coverage.*
+
+# --- IDE / editor ---
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# --- Project-specific generated artifacts ---
+# Sionna/PyTorch link-level simulation outputs (figures, CSVs, JSON, datasets,
+# logs, checkpoints). Keep source/configs/examples under version control.
+out/
+
+# Large local binaries / wheels / model checkpoints
+*.whl
+*.pt
+*.pth
+*.onnx
+*.h5
+*.hdf5
+
+# Logs
+*.log
+*.err

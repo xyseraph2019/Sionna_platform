@@ -1,0 +1,9 @@
+# 5G link-level simulation platform - dependencies
+# Sionna (PyTorch backend) + its runtime
+sionna>=2.0.1
+# Scientific stack (torch is pulled by sionna; pin if needed)
+numpy
+scipy
+# Config loading and plotting
+pyyaml
+matplotlib

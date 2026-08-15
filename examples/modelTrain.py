@@ -25,7 +25,7 @@ import os
 import sys
 import time
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+import common  # noqa: E402
 import torch
 
 from dmimo.config import load_dmimo_config, scenario_tag
@@ -195,7 +195,7 @@ def main() -> int:
                        num_dmrs_symbols=c.num_dmrs_symbols, err=err,
                        subband_size=subband_size)
     out = a.out or os.path.join(
-        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        common.ROOT,
         "out", "dmimo", "model", f"nn_pmi_mixer_{tag}.pt")
     meta = dict(
         tag=tag, arch="mixer",

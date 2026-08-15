@@ -35,7 +35,7 @@ D:\Platform\
 │   ├── link_adaptation.py       # 基于 BLER 的 MCS / CQI 选择
 │   ├── plotter.py               # 结果绘图
 │   ├── registry.py              # 组件注册表（信道/估计/检测/译码/发射 可插拔）
-│   └── components/base.py       # 可替换组件的接口契约
+│   └── components/base.py       # [已废弃] 仅向后兼容，不再被核心引用
 ├── configs\                     # YAML 场景
 │   ├── awgn_qpsk.yaml
 │   ├── tdl_c_16qam.yaml
@@ -45,10 +45,12 @@ D:\Platform\
 │   ├── bler_curves.py           # 完整 SNR 扫描 + 绘图
 │   ├── single_point.py          # 单 SNR 快速检查
 │   ├── run_scenarios.py         # 分组对比批量场景驱动
-│   └── plugins\                 # 通用平台的"表层代码"示例
-│       ├── custom_rx.py         # 自定义信道估计/检测器
-│       ├── custom_channel.py    # 自定义信道（flat_rayleigh）
-│       └── compare_receivers.py # 端到端接收机对比 demo
+│   ├── custom_components.py     # 自定义信道/估计/检测（推荐）
+│   ├── plugins\                 # [已废弃] 旧插件目录，仅向后兼容
+│   │   ├── custom_rx.py         # 旧版，建议改用 custom_components
+│   │   ├── custom_channel.py    # 旧版，建议改用 custom_components
+│   │   └── compare_receivers.py # 端到端接收机对比 demo
+│   └── common.py                # 示例共用路径引导
 ├── run_simulation.py            # 命令行入口
 └── requirements.txt
 ```

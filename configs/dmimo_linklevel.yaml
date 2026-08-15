@@ -38,7 +38,7 @@ nn_pmi_ckpt: "out/dmimo/model/nn_pmi_mixer_3trp_rank2_240sc_qam16_r050_uma_est2d
 # -16..10 covers the full CJT waterfall (3TRP coherent ~-16..-8 dB, 3TRP+err
 # ~-12..-4 dB, single TRP ~-8..0 dB) plus the zero-BLER high-SNR region.
 snr_start_db: -16
-snr_stop_db: 16
+snr_stop_db: 0
 snr_step_db: 2
 num_trials: 128
 device: "auto"

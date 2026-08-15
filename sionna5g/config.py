@@ -88,10 +88,15 @@ class PUSCHConfig:
         Time-domain PUSCH allocation within a slot, e.g. (0, 14).
     precoding : str
         "non-codebook" or "codebook".
-    num_ut : int
-        Number of user equipments (single-UE link for the physical layer).
     transform_precoding : bool
         Whether DFT-spread OFDM (single carrier) is used.
+
+    Notes
+    -----
+    ``num_layers`` is the number of MIMO spatial streams.
+    ``num_antenna_ports`` is the number of UE transmit antenna ports.
+    The platform currently models a single-UE physical link, so there is no
+    ``num_ut`` parameter.
     """
 
     num_layers: int = 1
@@ -100,7 +105,6 @@ class PUSCHConfig:
     symbol_start: int = 0
     symbol_length: int = 14
     precoding: str = "non-codebook"
-    num_ut: int = 1
     transform_precoding: bool = False
 
 
@@ -111,7 +115,8 @@ class ChannelConfig:
     Attributes
     ----------
     channel_type : str
-        One of "awgn", "tdl", "cdl".
+        One of ``"awgn" | "tdl" | "cdl" | "uma" | "umi"`` or a custom registered
+        channel name.
     model : str
         TDL/CDL model id, e.g. "A", "B", "C", "D", "E" or "CDL-A"...
     delay_spread : float
@@ -120,9 +125,21 @@ class ChannelConfig:
         Carrier frequency in Hz.
     min_speed, max_speed : float
         UE velocity range in m/s (Doppler / channel aging).
+    o2i_model : str
+        Outdoor-to-indoor pathloss model for uma/umi ("low"|"high").
+    ut_distance, ut_height : float
+        UE position used by UMa/UMi topology.
+    normalize_channel : bool
+        Whether to normalise the frequency-domain channel to unit energy.
+        For TDL/CDL this is optional (default False).
+        For UMa/UMi the platform currently always normalises, so this field is
+        ignored for those channel types.
+    num_rx_ant : int | None
+        Number of BS receive antennas; ``None`` means use the PUSCH antenna-port
+        count.
     """
 
-    channel_type: str = "awgn"  # awgn | tdl | cdl | uma | umi
+    channel_type: str = "awgn"  # awgn | tdl | cdl | uma | umi | <custom>
     model: str = "C"
     delay_spread: float = 100e-9
     carrier_frequency: float = 3.5e9
@@ -148,15 +165,11 @@ class ReceiverConfig:
         ``"lmmse"`` (default), ``"zf"``, or any registered detector name.
     tb_decoder : str
         ``"default"`` or any registered decoder name.
-    num_demod_iter : int | None
-        Passed through to the TB decoder when not ``None`` (LDPC outer-loop
-        iterations).
     """
 
     channel_estimator: str = "ls"
     mimo_detector: str = "lmmse"
     tb_decoder: str = "default"
-    num_demod_iter: Optional[int] = None
 
 
 @dataclass

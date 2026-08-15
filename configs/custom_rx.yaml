@@ -37,4 +37,3 @@ receiver:
   channel_estimator: "ls_avg"   # custom (registered) | "ls" | "perfect"
   mimo_detector: "mf"           # custom (registered) | "lmmse" | "zf"
   tb_decoder: "default"
-  num_demod_iter: null

@@ -9,7 +9,7 @@ def _stamp(path):
     root, ext = os.path.splitext(path)
     return f"{root}_{time.strftime('%Y%m%d_%H%M%S')}{ext}"
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+import common  # noqa: E402
 import matplotlib; matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import torch
@@ -91,7 +91,7 @@ def _run(a, c, mk, precoders, sel, dev):
     ax.axhline(0.1, color="grey", ls="--", lw=1, label="10% BLER")
     ax.set_yscale("log"); ax.set_xlabel("SNR (dB)"); ax.set_ylabel("BLER")
     ax.grid(True, which="both", alpha=0.3); ax.legend(fontsize=8); fig.tight_layout()
-    out = a.out or _stamp(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    out = a.out or _stamp(os.path.join(common.ROOT,
                                        "out", "dmimo",
                                        f"linklevel_{tag}.png"))
     os.makedirs(os.path.dirname(out), exist_ok=True)

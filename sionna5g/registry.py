@@ -3,11 +3,11 @@ Lightweight component registry for the generic 5G link-level platform.
 
 Components (channels, channel estimators, MIMO detectors, transport-block
 decoders, transmitters) are looked up by name and built through a callable
-``builder``. Built-in components are registered here; advanced users register
+``builder``. Built-in components are implemented directly in the concrete modules; the registry is mainly for custom components. Users register
 their own (e.g. a custom channel estimator) at the *surface level* and then
 select it from a YAML config, without touching the orchestration core.
 
-Kinds and builder signatures (see ``components/base.py``):
+Kinds and builder signatures (see the concrete module docstrings):
 
   channel     : (ChannelConfig, resource_grid, device, num_tx_ant, num_rx_ant)
                 -> (ofdm_channel, system_level_model_or_None)
@@ -67,7 +67,10 @@ def _scs(cfg):
 
 
 # ---------------------------------------------------------------------------
-# Built-in channels: builder(cfg, resource_grid, device, tx_ant, rx_ant)
+# Backward-compatible built-in channel builders. The current core constructs
+# these directly in ``sionna5g.channel``; these entries are kept so code that
+# calls ``registry.build("channel", ...)`` still works.
+# Builder: (cfg, resource_grid, device, tx_ant, rx_ant)
 # -> (ofdm_channel_or_None, system_level_model_or_None)
 # ---------------------------------------------------------------------------
 def _ch_awgn(cfg, rg, device, tx_ant, rx_ant):

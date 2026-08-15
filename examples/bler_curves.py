@@ -14,7 +14,7 @@ import sys
 import time
 
 # Allow in-place import of the ``sionna5g`` package.
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+import common  # noqa: E402
 
 import torch
 
@@ -31,7 +31,7 @@ def _stamp(path):
 
 
 def main():
-    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    root = common.ROOT
     cfg = load_config(os.path.join(root, "configs", "tdl_c_16qam.yaml"))
     torch.manual_seed(cfg.seed)
 

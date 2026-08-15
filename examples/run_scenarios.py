@@ -32,7 +32,7 @@ import time
 
 import torch
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+import common  # noqa: E402
 
 from sionna5g.config import (  # noqa: E402
     SimConfig, CarrierConfig, PUSCHConfig, TBConfig, ChannelConfig, ReceiverConfig,
@@ -50,7 +50,7 @@ def _stamp(path):
     return f"{root}_{time.strftime('%Y%m%d_%H%M%S')}{ext}"
 
 
-ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+ROOT = common.ROOT
 OUT = os.path.join(ROOT, "out", "results")
 SCEN_DIR = os.path.join(OUT, "scenarios")
 FIG_DIR = os.path.join(OUT, "figures")
@@ -170,7 +170,7 @@ def run_all(trials: int = TRIALS, batch: int = BATCH, groups: str | None = None)
     selected_groups = [g.strip() for g in groups.split(",")] if groups else [g[0][0] for g in GROUPS]
 
     # Register the example custom components (ls_avg / mf / flat_rayleigh).
-    from examples.plugins import custom_rx, custom_channel  # noqa: F401
+    import examples.custom_components  # noqa: F401
 
     # ---- 1. Run every scenario once (reused across groups) ----
     results = {}

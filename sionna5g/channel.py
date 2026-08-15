@@ -26,7 +26,7 @@ import torch.nn as nn
 from sionna.phy import PI
 
 from .config import ChannelConfig
-from .transmitter import PUSCHTransmitterWrapper
+
 
 
 def _awgn_variance(snr_db, num_layers=1):
@@ -61,20 +61,101 @@ class ChannelModelWrapper(nn.Module):
         self._sl_model = None  # system-level UMa/UMi channel model (topology-driven)
         self.num_tx_ant = int(num_tx_ant)
         self.num_rx_ant = int(num_rx_ant) if num_rx_ant else int(num_tx_ant)
+        self.resource_grid = resource_grid
 
-        # Build the channel through the registry so new propagation models can be
-        # added with a single ``register("channel", ...)`` + a config line.
-        from . import registry
+        # Built-in channels are constructed directly so the code path is easy to
+        # follow. Custom channels can still be added through the registry.
+        if self._type == "awgn":
+            self._ofdm_channel, self._sl_model = None, None
+        elif self._type in ("tdl", "cdl"):
+            self._ofdm_channel, self._sl_model = self._build_tr38901_channel()
+        elif self._type in ("uma", "umi"):
+            self._ofdm_channel, self._sl_model = self._build_uma_umi_channel()
+        else:
+            from . import registry
 
-        if not registry.has("channel", self._type):
-            raise ValueError(
-                f"Unknown channel_type '{channel.channel_type}'. "
-                f"Registered: {registry.names('channel')}"
+            if not registry.has("channel", self._type):
+                raise ValueError(
+                    f"Unknown channel_type '{channel.channel_type}'. "
+                    f"Registered: {registry.names('channel')}"
             )
-        self._ofdm_channel, self._sl_model = registry.build(
-            "channel", self._type, channel, resource_grid, device,
-            self.num_tx_ant, self.num_rx_ant,
+            self._ofdm_channel, self._sl_model = registry.build(
+                "channel", self._type, channel, resource_grid, device,
+                self.num_tx_ant, self.num_rx_ant,
         )
+
+    def _build_tr38901_channel(self):
+        """Build TDL or CDL through Sionna's OFDMChannel."""
+        from sionna.phy.channel import OFDMChannel
+        from sionna.phy.channel.tr38901 import CDL, TDL
+
+        cfg = self.channel_cfg
+        max_speed = cfg.max_speed if cfg.max_speed is not None else cfg.min_speed
+        if self._type == "tdl":
+            model = TDL(
+                model=cfg.model,
+                delay_spread=cfg.delay_spread,
+                carrier_frequency=cfg.carrier_frequency,
+                min_speed=cfg.min_speed,
+                max_speed=max_speed,
+                num_rx_ant=self.num_rx_ant,
+                num_tx_ant=self.num_tx_ant,
+                device=self.device,
+            )
+        else:
+            from .registry import panel_array
+
+            ut = panel_array(self.num_tx_ant, cfg.carrier_frequency, self.device)
+            bs = panel_array(self.num_rx_ant, cfg.carrier_frequency, self.device)
+            model = CDL(
+                model=cfg.model,
+                delay_spread=cfg.delay_spread,
+                carrier_frequency=cfg.carrier_frequency,
+                ut_array=ut,
+                bs_array=bs,
+                direction="uplink",
+                min_speed=cfg.min_speed,
+                max_speed=max_speed,
+                device=self.device,
+            )
+        ofdm = OFDMChannel(
+            channel_model=model,
+            resource_grid=self.resource_grid,
+            normalize_channel=cfg.normalize_channel,
+            return_channel=True,
+            device=self.device,
+        )
+        return ofdm, None
+
+    def _build_uma_umi_channel(self):
+        """Build UMa/UMi with pathloss/shadowing off and unit-energy normalisation."""
+        from sionna.phy.channel import OFDMChannel
+        from sionna.phy.channel.tr38901 import UMa, UMi
+        from .registry import panel_array
+
+        cfg = self.channel_cfg
+        ut = panel_array(self.num_tx_ant, cfg.carrier_frequency, self.device)
+        bs = panel_array(self.num_rx_ant, cfg.carrier_frequency, self.device)
+        cls = UMa if self._type == "uma" else UMi
+        sl = cls(
+            carrier_frequency=cfg.carrier_frequency,
+            o2i_model=cfg.o2i_model,
+            ut_array=ut,
+            bs_array=bs,
+            direction="uplink",
+            enable_pathloss=False,
+            enable_shadow_fading=False,
+            device=self.device,
+        )
+        ofdm = OFDMChannel(
+            channel_model=sl,
+            resource_grid=self.resource_grid,
+            normalize_channel=True,
+            return_channel=True,
+            device=self.device,
+        )
+        return ofdm, sl
+
 
     @property
     def is_awgn(self) -> bool:

@@ -19,6 +19,7 @@ import sys
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+from examples import common
 
 import torch
 
@@ -28,9 +29,9 @@ from sionna5g.simulator import LinkSimulator
 from sionna5g.metrics import bler_10db, save_metrics_csv
 from sionna5g.plotter import plot_link_performance
 
-# ---- import the plugins so the custom names exist in the registry ----
-from examples.plugins import custom_rx  # noqa: F401  (registers ls_avg, mf)
-from examples.plugins import custom_channel  # noqa: F401  (registers flat_rayleigh)
+# ---- import the flat custom-components module so names exist in the registry ----
+import examples.custom_components  # noqa: F401  (registers ls_avg, mf, flat_rayleigh)
+
 
 
 def _stamp(path):
@@ -93,7 +94,7 @@ def main() -> int:
     p.add_argument("--trials", type=int, default=200)
     args = p.parse_args()
 
-    out_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "out", "rxcompare")
+    out_dir = os.path.join(common.ROOT, "out", "rxcompare")
     os.makedirs(out_dir, exist_ok=True)
 
     print("== Receiver algorithm comparison (TDL-C 2x2, MCS12) ==")

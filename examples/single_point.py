@@ -9,7 +9,7 @@ Run::
 import os
 import sys
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+import common  # noqa: E402
 
 import torch
 
@@ -18,7 +18,7 @@ from sionna5g.simulator import LinkSimulator
 
 
 def main():
-    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    root = common.ROOT
     cfg = load_config(os.path.join(root, "configs", "awgn_qpsk.yaml"))
     torch.manual_seed(cfg.seed)
 

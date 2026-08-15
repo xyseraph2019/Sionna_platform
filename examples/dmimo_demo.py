@@ -18,7 +18,7 @@ import math
 import os
 import sys
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+import common  # noqa: E402
 
 import torch
 
@@ -114,7 +114,7 @@ def main() -> int:
         print("\n== B. UMa coverage (pathloss ON) ==", flush=True)
         run_coverage(args.batch, args.snr, args.nt, args.nsc)
 
-    out_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "out", "dmimo")
+    out_dir = os.path.join(common.ROOT, "out", "dmimo")
     os.makedirs(out_dir, exist_ok=True)
     link = build_link(num_trps=3, num_tx_ant=args.nt, n_subcarriers=args.nsc,
                       channel_kind=args.channel, pathloss=(args.channel != "simple"),

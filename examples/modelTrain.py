@@ -29,10 +29,15 @@ import common  # noqa: E402
 import torch
 
 from dmimo.config import load_dmimo_config, scenario_tag
-from dmimo.experiment import build_link
-from dmimo.modelDesign import MLPMixerSubbandPMI
-from dmimo.nn_pmi import NNMixerPMI, wideband_pmi, expand_subband_to_subcarriers, save_model
-from dmimo.precoding import TypeICodebook, CJTPrecoder
+from dmimo import build_link
+from dmimo import (
+    MLPMixerSubbandPMI,
+    NNMixerPMI,
+    expand_subband_to_subcarriers,
+    save_model,
+    wideband_pmi,
+)
+from dmimo import CJTPrecoder, TypeICodebook
 
 # =====================================================================
 # System parameters (edit here or override via --flags)

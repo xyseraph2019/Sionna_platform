@@ -15,9 +15,9 @@ import common  # noqa: E402
 import matplotlib; matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import torch
-from dmimo.experiment import build_link
-from dmimo.link_level import LinkLevelDMIMO
-from dmimo.precoding import IndependentMRT, CJTPrecoder, TypeICodebook
+from dmimo import build_link
+from dmimo import LinkLevelDMIMO
+from dmimo import CJTPrecoder, IndependentMRT, TypeICodebook
 
 DIST = (100., 200., 350.)
 
@@ -33,8 +33,8 @@ def snr_at_bler(bler, snrs, target=0.1):
             return ps + (pb - target) / (pb - b) * (s - ps)
         ps, pb = s, b
     return None
-def curve(ll, pc, snrs, batch):
-    return [ll.block(batch, s, pc)[0] for s in snrs]
+def curve(ll, pc, snrs, batch, seed=0):
+    return [ll.block(batch, s, pc, seed=seed + i)[0] for i, s in enumerate(snrs)]
 
 
 
@@ -101,11 +101,26 @@ def _run(args, mk, precoders, sel, dev):
     print(f"  CSI={est}  detect={'TB-CRC' if not args.no_crc else 'full-bit compare'}")
     curves = {}
     snrs = args.snr_db
-    for name in sel:
-        pc = precoders[name](r)
-        curves[f"{name} singleTRP"] = curve(l1, pc, snrs, args.batch)
-        curves[f"{name} 3TRP coherent"] = curve(l0, pc, snrs, args.batch)
-        curves[f"{name} 3TRP+err"] = curve(le, pc, snrs, args.batch)
+    pcs = {name: precoders[name](r) for name in sel}
+    t_start = time.time()
+    total_snr = len(snrs)
+
+    for i, s in enumerate(snrs):
+        res1 = l1.evaluate_many(args.batch, s, pcs, seed=i)
+        res0 = l0.evaluate_many(args.batch, s, pcs, seed=i)
+        rese = le.evaluate_many(args.batch, s, pcs, seed=i)
+        for name in sel:
+                    curves.setdefault(f"{name} singleTRP", []).append(res1[name][0])
+                    curves.setdefault(f"{name} 3TRP coherent", []).append(res0[name][0])
+                    curves.setdefault(f"{name} 3TRP+err", []).append(rese[name][0])
+        elapsed = time.time() - t_start
+        avg = elapsed / (i + 1)
+        eta = avg * (total_snr - i - 1)
+        print(
+            f"  [SNR {i + 1:2d}/{total_snr}] {s:6.1f} dB done "
+            f"({elapsed:7.1f}s elapsed, ETA {eta:7.1f}s)",
+            flush=True,
+        )
     print("  SNR   | " + " | ".join(f"{n:>20}" for n in curves))
     for i, s in enumerate(snrs):
         print(f"  {s:4g} | " + " | ".join(f"{curves[n][i]:20.3f}" for n in curves))
@@ -121,6 +136,16 @@ def _run(args, mk, precoders, sel, dev):
     out = _stamp(os.path.join(out_dir, f"linklevel_bler_rank{r}.png"))
     fig.savefig(out, dpi=150)
     print("Saved BLER figure ->", out)
+    import csv
+
+    csv_path = os.path.splitext(out)[0] + ".csv"
+    with open(csv_path, "w", newline="", encoding="utf-8") as fh:
+        writer = csv.writer(fh)
+        writer.writerow(["snr_db"] + list(curves.keys()))
+        for i, s in enumerate(snrs):
+            writer.writerow([s] + [curves[n][i] for n in curves])
+    print("Saved CSV ->", csv_path)
+
 
     if args.sweep:
         coarse = [-10, -6, -2, 2, 6, 10]

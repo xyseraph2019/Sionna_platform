@@ -15,8 +15,8 @@ import common  # noqa: E402
 
 import torch
 
-from dmimo.experiment import build_link, evaluate_precoder
-from dmimo.precoding import IndependentMRT, TypeICodebook, CJTPrecoder
+from dmimo import build_link, evaluate_precoder
+from dmimo import CJTPrecoder, IndependentMRT, TypeICodebook
 
 TAU = (0.0, 130e-9, 260e-9)
 DIST = (100.0, 200.0, 350.0)

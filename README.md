@@ -227,8 +227,8 @@ z[k] = Σ_t  g_t[k] · (w_t[k]ᴴ h_t[k]),      g_t[k] = c_t · exp(-j2π τ_t f
 - `dmimo/channels.py`：每 TRP 下行信道生成，**可选 `simple`/`tdl`/`cdl`/`uma`/`umi`**，
   路损可开关（默认开，按最强 TRP 归一化以体现覆盖梯度）；
 - `dmimo/precoding.py`：独立 MRT/ZF 基线 + **CJT 联合预编码**（相干联合传输，逐子载波 SVD）+ **Type I 码本**（双极化，wideband/subband）+ `Precoder` 接口（后续 NN 预编码器注入点）；
-- `dmimo/link.py`：`DMIMODownlink` 合并多 TRP、施加误差、输出 SINR/速率/增益损耗；
-- `dmimo/experiment.py`：数据集生成（`generate_dataset`/`save_dataset`）与任意预编码器评估。
+- `dmimo/link.py`：`DMIMODownlink` 合并多 TRP、施加误差、输出 SINR/速率/增益损耗；同时提供 `build_link`/`evaluate_precoder`/`generate_dataset`/`save_dataset`；
+- `dmimo/experiment.py`：[已废弃] 仅向后兼容，新代码请使用 `dmimo.link`。
 
 **运行示例**（打印增益损耗随 τ 的变化，并保存训练用数据集）：
 

@@ -22,8 +22,8 @@ import common  # noqa: E402
 
 import torch
 
-from dmimo.experiment import build_link, evaluate_precoder
-from dmimo.precoding import IndependentMRT
+from dmimo import build_link, evaluate_precoder
+from dmimo import IndependentMRT
 
 TAU = (0.0, 130e-9, 260e-9)
 DIST = (100.0, 200.0, 350.0)
@@ -119,7 +119,7 @@ def main() -> int:
     link = build_link(num_trps=3, num_tx_ant=args.nt, n_subcarriers=args.nsc,
                       channel_kind=args.channel, pathloss=(args.channel != "simple"),
                       trp_distances=DIST, tau_seconds=TAU, cal_amp_error=0.1, cal_pha_error=0.1)
-    from dmimo.experiment import generate_dataset, save_dataset
+    from dmimo import generate_dataset, save_dataset
     save_dataset(generate_dataset(link, args.batch, args.snr, num_batches=1, device=dev),
                  os.path.join(out_dir, "dmimo_dataset.pt"))
     print(f"\nSaved training-ready dataset -> out/dmimo/dmimo_dataset.pt (channel={args.channel})")

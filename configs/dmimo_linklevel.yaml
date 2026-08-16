@@ -31,7 +31,7 @@ num_dmrs_symbols: 2        # >=2 with rank>=2: interleaved comb -> full per-stre
 use_crc: true
 
 precoder: "all"            # mrt | cjt | type1 | all | nn
-nn_pmi_ckpt: "out/dmimo/model/nn_pmi_mixer_3trp_rank2_240sc_qam16_r050_uma_est2dmrs_err_sub12.pt"
+nn_pmi_ckpt: "auto"  # auto = 根据 num_trps/rank/n_subcarriers/qam/code_rate 等自动匹配 out/dmimo/model/nn_pmi_mixer_<tag>.pt
 
 # SNR sweep range (dB): start, stop, step.
 # Use a plain `snr_db: [-24, -22, ...]` list to override the generated grid.
@@ -41,5 +41,6 @@ snr_start_db: -16
 snr_stop_db: 0
 snr_step_db: 2
 num_trials: 128
+num_mc_batches: 20  # 每个 SNR 下跑的蒙特卡洛批次数；总 TB 数 = num_trials * num_mc_batches
 device: "auto"
 seed: 0

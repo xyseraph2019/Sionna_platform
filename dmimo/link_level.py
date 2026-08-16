@@ -1,4 +1,4 @@
-﻿"""
+"""
 Link-level DMIMO simulator: transmit *actual bits* over the multi-TRP downlink
 and report BLER / BER / throughput, reusing the existing channel / precoder /
 error building blocks from ``dmimo`` and **Sionna's standard PHY building blocks**
@@ -226,7 +226,7 @@ class LinkLevelDMIMO:
             self.tb_size = self.k
             self.crc_length = 0
 
-    def block(self, batch_size, snr_db, precoder, device=None):
+    def block(self, batch_size, snr_db, precoder, device=None, seed=None):
         """Run one batch of transport blocks -> (bler, ber, info_bits).
 
         Inference-only: wrapped in ``torch.no_grad()`` so learnable precoders do
@@ -234,6 +234,9 @@ class LinkLevelDMIMO:
         decoding (that would explode GPU memory, e.g. ~11 GB for the NN-PMI
         mixer at batch 32 vs ~0.5 GB with no_grad).
         """
+        if seed is not None:
+            torch.manual_seed(seed)
+
         with torch.no_grad():
             return self._block_impl(batch_size, snr_db, precoder, device)
 
@@ -280,6 +283,93 @@ class LinkLevelDMIMO:
             bler = float((b_hat != bits).any(dim=-1).float().mean().item())
         ber = float((b_hat != bits).float().mean().item())
         return bler, ber, self.k
+
+    def _sample(self, batch_size, device=None):
+        """Draw one channel/error/bits realization for a batch."""
+        device = device or self.device
+        h = self.link.channel.sample(batch_size, device).to(device)   # [B,K,D,Nt,N]
+        h_err = self.link.error.apply(h)                              # with errors
+        bits = torch.randint(0, 2, (batch_size, self.k),
+                             dtype=torch.float32, device=device)
+        return h, h_err, bits
+
+    def evaluate_many(self, batch_size, snr_db, precoders, device=None, seed=None,
+                      num_batches=1):
+        """Run several precoders on the *same* channel/bits realizations.
+
+        For each batch, one channel/error/bits realization is sampled and shared
+        by all precoders. Results are accumulated over ``num_batches`` Monte-Carlo
+        batches, giving a more stable BLER/BER estimate without requiring one huge
+        batch in GPU memory.
+        """
+        if seed is not None:
+            torch.manual_seed(seed)
+
+        accum = {
+            name: {"blocks": 0, "block_errors": 0.0, "bit_errors": 0.0, "bits": 0}
+            for name in precoders
+        }
+        with torch.no_grad():
+            for _ in range(int(num_batches)):
+                h, h_err, bits = self._sample(batch_size, device)
+                for name, pc in precoders.items():
+                    bler, ber, k = self._block_from_tensors(h, h_err, bits, snr_db, pc, device)
+                    a = accum[name]
+                    a["blocks"] += batch_size
+                    a["block_errors"] += bler * batch_size
+                    a["bits"] += batch_size * k
+                    a["bit_errors"] += ber * batch_size * k
+
+        return {
+            name: (
+                a["block_errors"] / a["blocks"],
+                a["bit_errors"] / a["bits"],
+                self.k,
+            )
+            for name, a in accum.items()
+        }
+
+    def _block_from_tensors(self, h, h_err, bits, snr_db, precoder, device=None):
+        """Evaluate one precoder on pre-sampled channel/bits tensors."""
+        device = device or self.device
+        batch_size = h.shape[0]
+        no = 10.0 ** (-snr_db / 10.0)   # total AWGN variance (unit-power signal)
+        w = precoder(h_err) if getattr(precoder, "precodes_from_errors", False) else precoder(h)
+        H_eff = self.link._combine(h_err, w)               # [B, N_rx, rank, N_sc]
+
+        cw = self.enc(bits)                                # [B, n]
+        # map codeword bits onto per-stream data REs
+        cw_r = cw.reshape(batch_size, 1, self.rank, self.n_data_sym, self.bits_sym)
+        s = self.mapper(cw_r).squeeze(-1)                  # [B, 1, rank, n_data]
+        x_rg = self.rg_mapper(s)                           # [B, 1, rank, n_sym, N_sc]
+
+        # ---- effective channel (static across symbols) + AWGN --------------
+        # Format H_eff as the Sionna channel tensor
+        # [B, num_rx=1, N_rx, num_tx=1, rank, n_sym, N_sc]
+        h7 = (H_eff.unsqueeze(1).unsqueeze(3).unsqueeze(5)
+                   .expand(batch_size, 1, H_eff.shape[1], 1, self.rank,
+                           self.n_symbols, self.n_data).contiguous())
+        y = self.channel(x_rg, h7, no)                     # [B, 1, N_rx, n_sym, N_sc]
+
+        # ---- channel estimation + LMMSE + demap + decode -------------------
+        if self.use_channel_estimation:
+            h_hat, err_var = self.ls_est(y, no)
+        else:
+            h_hat, err_var = h7, 0.0   # perfect CSI (true channel, no error)
+        x_hat, no_eff = self.lmmse(y, h_hat, err_var, no)  # [B,1,rank,n_data]
+        llr = self.demapper(x_hat, no_eff)                 # [B,1,rank,n_data,bits]
+        llr = llr.reshape(batch_size, self.n)
+
+        # ---- decode + error detection --------------------------------------
+        if self.use_crc:
+            b_hat, crc_ok = self.dec(llr)                  # [B,k], [B] True=OK
+            bler = float((~crc_ok).float().mean().item())
+        else:
+            b_hat = self.dec(llr)[..., :self.k]
+            bler = float((b_hat != bits).any(dim=-1).float().mean().item())
+        ber = float((b_hat != bits).float().mean().item())
+        return bler, ber, self.k
+
 
     def throughput_bps(self, bler: float, slot_duration: float = 0.5e-3) -> float:
         """Achievable throughput assuming BLER-errored blocks are lost."""

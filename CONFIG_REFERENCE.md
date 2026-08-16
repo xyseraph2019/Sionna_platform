@@ -126,6 +126,7 @@
 |---|---|---|
 | `snr_db` / `snr_start_db` / `snr_stop_db` / `snr_step_db` | 与通用平台相同，二选一 | `DMIMOConfig.snr_grid` |
 | `num_trials` | 每 SNR 点 TB 数 | 示例脚本 |
+| `num_mc_batches` | 每个 SNR 下跑的蒙特卡洛批次数；总 TB 数 = `num_trials * num_mc_batches` | `LinkLevelDMIMO.evaluate_many` |
 | `device` | `cpu` / `cuda:0` / `auto` | 示例脚本 |
 | `seed` | 随机种子 | 示例脚本 |
 

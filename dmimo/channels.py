@@ -149,7 +149,7 @@ class SionnaDownlinkChannel(nn.Module):
                                 min_speed=0.0, max_speed=0.0,
                                 num_rx_ant=self.d, num_tx_ant=self.nt)
                 self._models.append(model)
-                self._ofdm.append(OFDMChannel(channel_model=model, resource_grid=rg,
+                self._ofdm.append(OFDMChannel(channel_model=model, resource_grid=self._rg,
                                               normalize_channel=(not pathloss),
                                               return_channel=True))
             # external pathloss for CDL/TDL (Sionna does not include it)
@@ -207,7 +207,7 @@ class SionnaDownlinkChannel(nn.Module):
         relative per-TRP coverage gradient. Stores ``self._ref_power`` (per-TRP
         relative power, strongest = 1).
         """
-        ref = ht.abs().square().mean(dim=(0, 1, 3, 4))   # per-TRP mean power [K]
+        ref = ht.abs().square().mean(dim=(0, 2, 3, 4))   # per-TRP mean power [K]
         ref = ref.detach()
         self._ref_power = (ref / (ref.max() + 1e-12)).cpu()
         return ht / (ref.max().sqrt() + 1e-12)
@@ -229,7 +229,8 @@ class SionnaDownlinkChannel(nn.Module):
         for t, ofdm in enumerate(self._ofdm):
             _, h = ofdm(xf, torch.tensor(1.0))
             # h: [B, num_rx=1, num_rx_ant=D, num_tx=1, num_tx_ant, nsym=1, nsc]
-            parts.append(h[:, 0, :, 0, :, 0, :].permute(0, 2, 1, 3).unsqueeze(1))  # [B,1,D,Nt,N]
+            # h[:,0,:,0,:,0,:] is [B, D, Nt, N]; add the TRP axis -> [B,1,D,Nt,N]
+            parts.append(h[:, 0, :, 0, :, 0, :].unsqueeze(1))
         ht = torch.cat(parts, dim=1)                     # [B, K, D, Nt, N]
         if self.pathloss:
             ht = ht * self.beta.to(ht.device).view(1, self.k, 1, 1, 1).sqrt()

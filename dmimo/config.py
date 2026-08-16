@@ -41,6 +41,7 @@ class DMIMOConfig:
     snr_stop_db: float = -2.0
     snr_step_db: float = 2.0
     num_trials: int = 256
+    num_mc_batches: int = 1       # 每个 SNR 下跑的蒙特卡洛批次数（每批 num_trials 个 TB）
     device: str = "auto"
     seed: int = 0
 
@@ -64,7 +65,7 @@ class DMIMOConfig:
 
     def build_link(self):
         """Build a :class:`~dmimo.link.DMIMODownlink` from this config."""
-        from .experiment import build_link
+        from .link import build_link
 
         return build_link(num_trps=self.num_trps, num_tx_ant=self.num_tx_ant,
                           num_ue_ant=self.num_ue_ant, n_subcarriers=self.n_subcarriers,
@@ -88,7 +89,8 @@ def _coerce(name, v):
         except (TypeError, ValueError):
             return v
     if name in ("num_trps", "num_tx_ant", "num_ue_ant", "n_subcarriers", "qam_order", "rank",
-                "n_symbols", "dmrs_symbol", "num_dmrs_symbols", "num_trials", "seed",
+                "n_symbols", "dmrs_symbol", "num_dmrs_symbols", "num_trials",
+                "num_mc_batches", "seed",
                 "subband_size"):
         try:
             return int(v)

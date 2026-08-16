@@ -84,6 +84,8 @@
 | 字段 | 作用 | 使用方 |
 |---|---|---|
 | `channel_kind` | `simple` / `tdl` / `cdl` / `uma` / `umi` | `build_downlink_channel` |
+| `cdl_model` | CDL 模型：A/B/C/D/E，`channel_kind=cdl` 时生效 | `SionnaDownlinkChannel` |
+| `tdl_model` | TDL 模型：A/B/C/D/E，`channel_kind=tdl` 时生效 | `SionnaDownlinkChannel` |
 | `num_trps` | TRP 数量 | 所有 DMIMO 模块 |
 | `num_tx_ant` | 每个 TRP 的发射天线数 | 信道、预编码 |
 | `num_ue_ant` | UE 接收天线数 | 信道、预编码 |

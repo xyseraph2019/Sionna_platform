@@ -294,31 +294,58 @@ class LinkLevelDMIMO:
         return h, h_err, bits
 
     def evaluate_many(self, batch_size, snr_db, precoders, device=None, seed=None,
-                      num_batches=1):
+                      num_batches=1, on_batch=None):
         """Run several precoders on the *same* channel/bits realizations.
 
         For each batch, one channel/error/bits realization is sampled and shared
         by all precoders. Results are accumulated over ``num_batches`` Monte-Carlo
         batches, giving a more stable BLER/BER estimate without requiring one huge
         batch in GPU memory.
+
+        If ``on_batch`` is given, it is called after each batch with
+        ``(batch_idx, total_batches, snr_db, stats)`` where ``stats`` contains the
+        current running average BLER / sum-rate / post-equalization SNR for every
+        precoder.
         """
         if seed is not None:
             torch.manual_seed(seed)
 
         accum = {
-            name: {"blocks": 0, "block_errors": 0.0, "bit_errors": 0.0, "bits": 0}
+            name: {
+                "blocks": 0,
+                "block_errors": 0.0,
+                "bit_errors": 0.0,
+                "bits": 0,
+                "sum_rate": 0.0,
+                "post_snr_db": 0.0,
+            }
             for name in precoders
         }
+        total = int(num_batches)
         with torch.no_grad():
-            for _ in range(int(num_batches)):
+            for batch_idx in range(total):
                 h, h_err, bits = self._sample(batch_size, device)
                 for name, pc in precoders.items():
-                    bler, ber, k = self._block_from_tensors(h, h_err, bits, snr_db, pc, device)
+                    bler, ber, k, sum_rate, post_snr_db = \
+                        self._block_from_tensors_detailed(h, h_err, bits, snr_db, pc, device)
                     a = accum[name]
                     a["blocks"] += batch_size
                     a["block_errors"] += bler * batch_size
                     a["bits"] += batch_size * k
                     a["bit_errors"] += ber * batch_size * k
+                    a["sum_rate"] += sum_rate * batch_size
+                    a["post_snr_db"] += post_snr_db * batch_size
+
+                if on_batch is not None:
+                    stats = {}
+                    for name, a in accum.items():
+                        n = a["blocks"]
+                        stats[name] = {
+                            "bler": a["block_errors"] / n,
+                            "sum_rate": a["sum_rate"] / n,
+                            "post_snr_db": a["post_snr_db"] / n,
+                        }
+                    on_batch(batch_idx + 1, total, snr_db, stats)
 
         return {
             name: (
@@ -331,6 +358,13 @@ class LinkLevelDMIMO:
 
     def _block_from_tensors(self, h, h_err, bits, snr_db, precoder, device=None):
         """Evaluate one precoder on pre-sampled channel/bits tensors."""
+        bler, ber, k, _, _ = self._block_from_tensors_detailed(
+            h, h_err, bits, snr_db, precoder, device
+        )
+        return bler, ber, k
+
+    def _block_from_tensors_detailed(self, h, h_err, bits, snr_db, precoder, device=None):
+        """Evaluate one precoder and return BLER/BER plus rate/SNR diagnostics."""
         device = device or self.device
         batch_size = h.shape[0]
         no = 10.0 ** (-snr_db / 10.0)   # total AWGN variance (unit-power signal)
@@ -368,7 +402,15 @@ class LinkLevelDMIMO:
             b_hat = self.dec(llr)[..., :self.k]
             bler = float((b_hat != bits).any(dim=-1).float().mean().item())
         ber = float((b_hat != bits).float().mean().item())
-        return bler, ber, self.k
+
+        # ---- extra diagnostics ---------------------------------------------
+        # Average achievable sum rate from the effective post-precoding channel.
+        sum_rate = float(self.link._rate(H_eff, no).mean().item())
+        # Average post-equalization SNR (linear mean, then dB).
+        post_snr_lin = (1.0 / no_eff).mean().item()
+        post_snr_db = 10.0 * math.log10(max(post_snr_lin, 1e-12))
+
+        return bler, ber, self.k, sum_rate, post_snr_db
 
 
     def throughput_bps(self, bler: float, slot_duration: float = 0.5e-3) -> float:

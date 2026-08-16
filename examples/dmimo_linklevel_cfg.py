@@ -103,11 +103,38 @@ def _run(a, c, mk, precoders, sel, dev):
     t_start = time.time()
     total_snr = len(snr)
 
+    def make_on_batch(label):
+        """Build a per-batch progress callback for one link object."""
+        def on_batch(batch_idx, total_batches, snr_db, stats):
+            items = []
+            for name, st in stats.items():
+                items.append(
+                    f"{name}: BLER={st['bler']:.3f} "
+                    f"SR={st['sum_rate']:.3f} "
+                    f"pSNR={st['post_snr_db']:.2f}dB"
+                )
+            print(
+                f"    [{label} batch {batch_idx:2d}/{total_batches}] "
+                + " | ".join(items),
+                flush=True,
+            )
+        return on_batch
+
+
     for i, s in enumerate(snr):
         # One channel/bits realization per SNR is shared by all precoders.
-        res1 = l1.evaluate_many(c.num_trials, s, pcs, seed=c.seed + i, num_batches=c.num_mc_batches)
-        res0 = l0.evaluate_many(c.num_trials, s, pcs, seed=c.seed + i, num_batches=c.num_mc_batches)
-        rese = le.evaluate_many(c.num_trials, s, pcs, seed=c.seed + i, num_batches=c.num_mc_batches)
+        res1 = l1.evaluate_many(
+            c.num_trials, s, pcs, seed=c.seed + i,
+            num_batches=c.num_mc_batches, on_batch=make_on_batch("singleTRP"),
+        )
+        res0 = l0.evaluate_many(
+            c.num_trials, s, pcs, seed=c.seed + i,
+            num_batches=c.num_mc_batches, on_batch=make_on_batch("3TRP-coherent"),
+        )
+        rese = le.evaluate_many(
+            c.num_trials, s, pcs, seed=c.seed + i,
+            num_batches=c.num_mc_batches, on_batch=make_on_batch("3TRP+err"),
+        )
         for name in sel:
             curves.setdefault(f"{name} singleTRP", []).append(res1[name][0])
             curves.setdefault(f"{name} 3TRP coherent", []).append(res0[name][0])

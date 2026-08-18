@@ -106,6 +106,21 @@
 | `subband_size` | 子带大小（子载波数），CJT 与 NN-PMI 统一使用 | `CJTPrecoder`、`NNMixerPMI` |
 | `precoder` | `mrt` / `cjt` / `type1` / `all` / `nn` | 示例脚本选择要跑的预编码器 |
 
+### CSI 反馈量化（P3：有限比特反馈）
+
+| 字段 | 作用 | 使用方 |
+|---|---|---|
+| `feedback_quant` | `none` / `phase` / `iq`，是否启用反馈量化（`none` = 理想 CSI 上界） | `QuantizedFeedback` / 示例脚本 |
+| `feedback_bits_phase` | phase 量化每复系数的相位比特数（2/3/4/6/8） | `PhaseQuantizer` |
+| `feedback_bits_amp` | phase 量化振幅比特数，`null` = 保留连续振幅 | `PhaseQuantizer` |
+| `feedback_bits_iq` | iq 量化每实/虚部比特数（每复系数总开销 = 2×） | `ScalarQuantizer` |
+| `feedback_ste` | 直通估计器开关（NN-PMI 抗量化训练用） | `QuantizedFeedback` |
+| `feedback_subband_size` | 反馈子带大小（子载波），`null` = 复用 `subband_size` | `QuantizedFeedback` |
+
+> 反馈开销 = `num_trps × num_tx_ant × rank × S × b`，其中 `S = ceil(n_subcarriers / feedback_subband_size)`，`b` 为每复系数比特（phase 型 = `feedback_bits_phase`，iq 型 = `2 × feedback_bits_iq`）。
+> **语义**：本模块量化的是预编码器*输出*，对应 UE→BS 的 PMI 反馈（MRT/CJT 等连续预编码）或 fronthaul 系数信令/定点精度（可选场景）。**NN-PMI 默认不套输出量化**——它在基站本地由反馈回来的 Type I PMI 生成、输出无需回传，只作为不量化基准参与对比；如要做 fronthaul 故事，需显式包 `QuantizedFeedback(ste=True)` 并配 `feedback_ste` 训练。
+> Type I 码本本身就是量化预编码（beam 索引 + QPSK 共相位），不做双重包装，作为固定低比特参考。
+
 ### 链路级参数
 
 | 字段 | 作用 | 使用方 |

@@ -31,6 +31,12 @@ from .precoding import (
     CJTPrecoder,
     TypeICodebook,
 )
+from .feedback import (
+    PhaseQuantizer,
+    ScalarQuantizer,
+    QuantizedFeedback,
+    make_quantized,
+)
 
 __all__ = [
     "DMIMMetrics",
@@ -52,4 +58,8 @@ __all__ = [
     "IndependentZF",
     "CJTPrecoder",
     "TypeICodebook",
+    "PhaseQuantizer",
+    "ScalarQuantizer",
+    "QuantizedFeedback",
+    "make_quantized",
 ]

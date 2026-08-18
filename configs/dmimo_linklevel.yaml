@@ -17,6 +17,14 @@ cal_pha_error: 0.1
 granularity: "SC"          # SC | RB | SC_RB_granular
 subband_size: 12           # CJT 与 NN-PMI 统一预编码粒度（每子带子载波数；后续可改 48）
 
+# ---- P3: CSI 反馈量化（none = 理想 CSI 上界；phase/iq = 有限比特反馈）----
+feedback_quant: "none"        # none | phase | iq
+feedback_bits_phase: 4        # phase: 每复系数相位比特（2/3/4/6/8）
+feedback_bits_amp: null       # phase: 振幅比特（null = 保留连续振幅）
+feedback_bits_iq: 4           # iq: 每实/虚部比特
+feedback_ste: false           # 直通估计器（NN-PMI 抗量化训练用）
+feedback_subband_size: null   # null -> 复用 subband_size
+
 rank: 2                    # number of streams (1..4)
 qam_order: 16
 code_rate: 0.5

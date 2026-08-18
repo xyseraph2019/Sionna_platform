@@ -26,6 +26,13 @@ class DMIMOConfig:
     cal_pha_error: float = 0.1
     granularity: str = "SC"                   # SC|RB|SC_RB_granular
     subband_size: int = 12                    # CJT 与 NN-PMI 统一预编码粒度（子载波/子带）
+    # ---- P3: CSI 反馈量化（有限比特反馈，none=理想 CSI 上界）----
+    feedback_quant: str = "none"              # none | phase | iq
+    feedback_bits_phase: int = 4              # phase 量化：每复系数相位比特（2/3/4/6/8）
+    feedback_bits_amp: Optional[int] = None   # phase 量化：振幅比特（None=保留连续振幅）
+    feedback_bits_iq: int = 4                 # iq 量化：每实/虚部比特
+    feedback_ste: bool = False                # 直通估计器（NN-PMI 抗量化训练用）
+    feedback_subband_size: Optional[int] = None  # 反馈子带大小；None -> 复用 subband_size
     rank: int = 1
     qam_order: int = 16
     code_rate: float = 0.5
@@ -93,8 +100,8 @@ def _coerce(name, v):
             return v
     if name in ("num_trps", "num_tx_ant", "num_ue_ant", "n_subcarriers", "qam_order", "rank",
                 "n_symbols", "dmrs_symbol", "num_dmrs_symbols", "num_trials",
-                "num_mc_batches", "seed",
-                "subband_size"):
+                "num_mc_batches", "seed", "subband_size",
+                "feedback_bits_phase", "feedback_bits_iq", "feedback_subband_size"):
         try:
             return int(v)
         except (TypeError, ValueError):
@@ -106,7 +113,7 @@ def _coerce(name, v):
             return float(v)
         except (TypeError, ValueError):
             return v
-    if name in ("use_channel_estimation", "use_crc"):
+    if name in ("use_channel_estimation", "use_crc", "feedback_ste"):
         if isinstance(v, str):
             return v.strip().lower() in ("1", "true", "yes", "on")
         return bool(v)
@@ -126,7 +133,8 @@ def load_dmimo_config(path: str) -> DMIMOConfig:
 
 def scenario_tag(num_trps, rank, n_subcarriers, qam_order, code_rate,
                  channel_kind="uma", est=False, num_dmrs_symbols=1,
-                 err=False, subband_size=None, pathloss=False) -> str:
+                 err=False, subband_size=None, pathloss=False,
+                 feedback: Optional[str] = None) -> str:
     """Compact scenario tag for result-file names (filename == metadata).
 
     Example (3 TRPs, rank 2, 240 SC, 16-QAM, rate 0.5, UMa, LS estimation with
@@ -136,6 +144,9 @@ def scenario_tag(num_trps, rank, n_subcarriers, qam_order, code_rate,
 
     Every result file (BLER figure, NN model checkpoint, dataset) should embed
     this tag so its scenario is self-describing.
+
+    ``feedback``: CSI feedback quantizer label, e.g. ``"phase4"`` / ``"iq4"``
+    (appended as ``_fb<feedback>``); ``None`` means no quantization.
     """
     tag = (f"{int(num_trps)}trp_rank{int(rank)}_{int(n_subcarriers)}sc_"
            f"qam{int(qam_order)}_r{float(code_rate):.2f}").replace(".", "")
@@ -148,4 +159,6 @@ def scenario_tag(num_trps, rank, n_subcarriers, qam_order, code_rate,
         tag += "_err"
     if subband_size:
         tag += f"_sub{int(subband_size)}"
+    if feedback:
+        tag += f"_fb{feedback}"
     return tag

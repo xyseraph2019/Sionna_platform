@@ -75,6 +75,29 @@ def main() -> int:
     elif "nn" in c.precoder.lower() or "nnpmi" in c.precoder.lower():
         print(f"  [warning] NN-PMI requested but checkpoint not found: {c.nn_pmi_ckpt}")
         print("  -> skip NN-PMI")
+
+    # P3: CSI 反馈量化 —— 给连续预编码（MRT/CJT）包一层 QuantizedFeedback。
+    # Type I 本身已是码本（beam+QPSK）；NN-PMI 在 BS 本地由反馈 PMI 生成、
+    # 输出无需回传 —— 两者都不套输出量化器，作为不量化基准参与对比。
+    if c.feedback_quant in ("phase", "iq"):
+        from dmimo import QuantizedFeedback, PhaseQuantizer, ScalarQuantizer
+
+        fb_sub = c.feedback_subband_size or c.subband_size
+        if c.feedback_quant == "phase":
+            _qz = PhaseQuantizer(bits_phase=c.feedback_bits_phase,
+                                 bits_amp=c.feedback_bits_amp)
+        else:
+            _qz = ScalarQuantizer(bits=c.feedback_bits_iq)
+        for name in list(precoders):
+            if "TypeI" in name or "NN" in name:
+                continue
+            precoders[name] = (lambda base=precoders[name]:
+                               QuantizedFeedback(base(), _qz, subband_size=fb_sub,
+                                                 ste=c.feedback_ste))
+        print(f"  [feedback] quant={c.feedback_quant} bits_phase={c.feedback_bits_phase} "
+              f"bits_amp={c.feedback_bits_amp} bits_iq={c.feedback_bits_iq} sub={fb_sub} "
+              f"(NN-PMI/TypeI 不量化)")
+
     sel = list(precoders) if c.precoder.lower() == "all" else \
         [{"mrt": "MRT", "cjt": "CJT", "type1": "TypeI-wide", "typei": "TypeI-wide",
           "nn": "NN-PMI", "nnpmi": "NN-PMI"}.get(c.precoder.lower(), c.precoder)]

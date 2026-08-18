@@ -100,7 +100,8 @@ def main() -> int:
                       cal_amp_error=c.cal_amp_error, cal_pha_error=c.cal_pha_error,
                       granularity=c.granularity, channel_kind=c.channel_kind,
                       pathloss=c.pathloss, trp_distances=c.trp_distances_m,
-                      carrier_frequency=c.carrier_frequency)
+                      carrier_frequency=c.carrier_frequency,
+                        cdl_model=c.cdl_model, tdl_model=c.tdl_model)
 
     # ---- 2. model init ---------------------------------------------------------
     num_subbands = int(math.ceil(c.n_subcarriers / subband_size))

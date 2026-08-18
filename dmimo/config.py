@@ -11,6 +11,8 @@ import yaml
 @dataclass
 class DMIMOConfig:
     channel_kind: str = "uma"                 # simple|tdl|cdl|uma|umi
+    cdl_model: str = "A"                  # CDL 模型：A/B/C/D/E
+    tdl_model: str = "C"                  # TDL 模型：A/B/C/D/E
     num_trps: int = 3
     num_tx_ant: int = 4
     num_ue_ant: int = 1
@@ -74,7 +76,8 @@ class DMIMOConfig:
                           cal_amp_error=self.cal_amp_error, cal_pha_error=self.cal_pha_error,
                           granularity=self.granularity, channel_kind=self.channel_kind,
                           pathloss=self.pathloss, trp_distances=self.trp_distances_m,
-                          carrier_frequency=self.carrier_frequency)
+                          carrier_frequency=self.carrier_frequency,
+                           cdl_model=self.cdl_model, tdl_model=self.tdl_model)
 
 
 def _coerce(name, v):

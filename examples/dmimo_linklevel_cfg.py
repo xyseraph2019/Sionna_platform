@@ -48,7 +48,8 @@ def main() -> int:
                     n_subcarriers=c.n_subcarriers, subcarrier_spacing=c.subcarrier_spacing_khz * 1e3,
                     channel_kind=c.channel_kind, pathloss=c.pathloss,
                     trp_distances=[c.trp_distances_m[0]] if num_trps == 1 else list(c.trp_distances_m),
-                    granularity=c.granularity, carrier_frequency=c.carrier_frequency)
+                    granularity=c.granularity, carrier_frequency=c.carrier_frequency,
+                    cdl_model=c.cdl_model, tdl_model=c.tdl_model)
         from dmimo import build_link
         if err and num_trps > 1:
             base.update(tau_seconds=c.tau_seconds, cal_amp_error=c.cal_amp_error, cal_pha_error=c.cal_pha_error)

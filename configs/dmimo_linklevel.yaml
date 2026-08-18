@@ -1,5 +1,7 @@
 # Link-level DMIMO scenario (used by examples/dmimo_linklevel_cfg.py)
-channel_kind: "uma"        # simple | tdl | cdl | uma | umi
+channel_kind: "cdl"        # simple | tdl | cdl | uma | umi
+cdl_model: "C"            # CDL 模型：A/B/C/D/E（channel_kind=cdl 时生效）
+tdl_model: "C"            # TDL 模型：A/B/C/D/E（channel_kind=tdl 时生效）
 num_trps: 3
 num_tx_ant: 32
 num_ue_ant: 4              # >= rank (UE antennas for multi-stream)

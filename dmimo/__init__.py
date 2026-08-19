@@ -37,6 +37,13 @@ from .feedback import (
     QuantizedFeedback,
     make_quantized,
 )
+from .uplink import (
+    UDMIMMetrics,
+    UDMIMOLink,
+    build_ulink,
+    evaluate_ulink,
+)
+from .uplink_level import ULinkLevelDMIMO
 
 __all__ = [
     "DMIMMetrics",
@@ -62,4 +69,9 @@ __all__ = [
     "ScalarQuantizer",
     "QuantizedFeedback",
     "make_quantized",
+    "UDMIMMetrics",
+    "UDMIMOLink",
+    "build_ulink",
+    "evaluate_ulink",
+    "ULinkLevelDMIMO",
 ]

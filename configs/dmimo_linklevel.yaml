@@ -1,13 +1,16 @@
 # Link-level DMIMO scenario (used by examples/dmimo_linklevel_cfg.py)
+# Sionna Block-style model: DLModel (see dmimo/model.py)
 channel_kind: "cdl"        # simple | tdl | cdl | uma | umi
 cdl_model: "C"            # CDL 模型：A/B/C/D/E（channel_kind=cdl 时生效）
 tdl_model: "C"            # TDL 模型：A/B/C/D/E（channel_kind=tdl 时生效）
 num_trps: 3
-num_tx_ant: 32
-num_ue_ant: 4              # >= rank (UE antennas for multi-stream)
-n_subcarriers: 240
-subcarrier_spacing_khz: 30.0
-carrier_frequency: 3.5e9
+num_tx_ant: 32            # 每 TRP 天线数（CDL 需偶数）
+num_ue_ant: 4             # UE 天线数（>= rank）
+fft_size: 76              # 全 FFT 子载波数（含 guard/DC）
+num_guard_carriers: [5, 6]   # 左右 guard 子载波数（+DC 置零 -> 64 有效子载波）
+dc_null: true
+subcarrier_spacing_khz: 15.0
+carrier_frequency: 2.6e9
 pathloss: false            # true: include per-TRP pathloss/coverage
 
 trp_distances_m: [100, 200, 350]
@@ -15,7 +18,7 @@ tau_ns: [0, 130, 260]      # per-TRP timing offset (ns), TRP0=0
 cal_amp_error: 0.1         # None -> no calibration error
 cal_pha_error: 0.1
 granularity: "SC"          # SC | RB | SC_RB_granular
-subband_size: 12           # CJT 与 NN-PMI 统一预编码粒度（每子带子载波数；后续可改 48）
+subband_size: 12           # CJT 与 NN-PMI 统一预编码粒度（每子带子载波数）
 
 # ---- P3: CSI 反馈量化（none = 理想 CSI 上界；phase/iq = 有限比特反馈）----
 feedback_quant: "none"        # none | phase | iq
@@ -26,31 +29,31 @@ feedback_ste: false           # 直通估计器（NN-PMI 抗量化训练用）
 feedback_subband_size: null   # null -> 复用 subband_size
 
 rank: 2                    # number of streams (1..4)
-qam_order: 16
+qam_order: 4               # 星座点数：4=QPSK（2 bit/符号）
 code_rate: 0.5
 
-# P1: DMRS-like pilots + LS channel estimation (false = perfect CSI)
-use_channel_estimation: true
-est_density: 0.5           # DMRS comb density in the DMRS symbol (pilots/subcarrier)
-pilot_boost_db: 0.0        # P1: DMRS pilot energy boost (dB) vs a data symbol
-# P1: time-frequency resource grid (pilots and data in separate symbols)
-n_symbols: 14              # OFDM symbols per slot
-dmrs_symbol: 2             # front-loaded pilot-only DMRS symbol (mapping type A)
-num_dmrs_symbols: 2        # >=2 with rank>=2: interleaved comb -> full per-stream pilot coverage (no frequency-interp floor)
+# 接收端 CSI：perfect_csi=true 用真实有效信道；false 用 DMRS LS 估计（NN 插值）
+perfect_csi: false
+# 资源栅格与 DMRS 导频（映射类型 A，前置导频符号）
+n_symbols: 14              # OFDM 符号数（slot）
+pilot_ofdm_symbol_indices: [2, 11]   # DMRS 导频符号索引
+pilot_boost_db: 0.0        # 导频功率提升 (dB)
+cyclic_prefix_length: 6    # CP 长度（频域建模仅影响 Eb/N0 折算）
+speed: 0.0                 # UE 速度 m/s（信道老化；0=静态）
 # P2: 5G NR transport-block encoder/decoder with TB CRC error detection
 use_crc: true
 
 precoder: "all"            # mrt | cjt | type1 | all | nn
-nn_pmi_ckpt: "auto"  # auto = 根据 num_trps/rank/n_subcarriers/qam/code_rate 等自动匹配 out/dmimo/model/nn_pmi_mixer_<tag>.pt
+nn_pmi_ckpt: "auto"  # auto = 根据场景自动匹配 out/dmimo/model/nn_pmi_mixer_<tag>.pt
 
-# SNR sweep range (dB): start, stop, step.
-# Use a plain `snr_db: [-24, -22, ...]` list to override the generated grid.
-# -16..10 covers the full CJT waterfall (3TRP coherent ~-16..-8 dB, 3TRP+err
-# ~-12..-4 dB, single TRP ~-8..0 dB) plus the zero-BLER high-SNR region.
-snr_start_db: -16
-snr_stop_db: 0
-snr_step_db: 2
-num_trials: 128
-num_mc_batches: 5  # 每个 SNR 下跑的蒙特卡洛批次数；总 TB 数 = num_trials * num_mc_batches
+# Eb/N0 sweep range (dB) —— 示例 Notebook 风格，默认 -5..19 step 4
+# 用 `ebno_db: [-5, -1, ...]` 显式列表可覆盖自动网格
+ebno_start_db: -5
+ebno_stop_db: 19
+ebno_step_db: 4
+num_trials: 128            # 每 MC 批的 TB 数（batch_size）
+num_mc_batches: 5          # 每个 SNR 下的 MC 迭代数上限（sim_ber 提前停止）
+target_bler: 1e-3          # sim_ber 提前停止目标 BLER
+num_target_block_errors: 1000  # sim_ber 提前停止块错误数
 device: "auto"
 seed: 0

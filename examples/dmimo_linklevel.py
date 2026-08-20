@@ -1,166 +1,154 @@
-"""Link-level DMIMO (rank 1-4): real LDPC+QAM over multi-TRP downlink, MRT/CJT/
-TypeI-wideband precoding, configurable timing/calibration errors, DMRS-like LS
-channel estimation (P1) and 5G NR TB-CRC error detection (P2).
-Run: python examples\\dmimo_linklevel.py --rank 2 --sweep
+"""Link-level DL DMIMO (rank 1-4) CLI driver (Sionna Block style).
+
+Precoded MRT/CJT/TypeI / NN-PMI transmission over per-TRP CDL channels with
+configurable timing/calibration errors, DMRS LS channel estimation and 5G NR
+TB-CRC error detection. BLER curves on the Eb/N0 axis, all precoders sharing
+the same realizations per point (:func:`dmimo.sim.sim_ber_many`).
+
+Run::
+
+    python examples\\dmimo_linklevel.py --rank 2 --channel cdl --ebno-start -5 --ebno-stop 15
 """
-import os, sys, argparse, time
+import argparse
+import os
+import sys
+import time
+
+import common  # noqa: E402
+import torch  # noqa: E402
+
+from dmimo import (DLModel, IndependentMRT, CJTPrecoder, TypeICodebook,
+                   sim_ber_many, save_curves, print_curve_table)
 
 
 def _stamp(path):
-    """Append a timestamp so a rerun does not overwrite the previous figure."""
     root, ext = os.path.splitext(path)
     return f"{root}_{time.strftime('%Y%m%d_%H%M%S')}{ext}"
 
-import common  # noqa: E402
-import matplotlib; matplotlib.use("Agg")
-import matplotlib.pyplot as plt
-import torch
-from dmimo import build_link
-from dmimo import LinkLevelDMIMO
-from dmimo import CJTPrecoder, IndependentMRT, TypeICodebook
-
-DIST = (100., 200., 350.)
-
-def snr_range(start, stop, step):
-    """Arithmetic SNR grid (dB): start, +step, ..., <= stop."""
-    n = int((stop - start) / step + 1e-9) + 1
-    return [round(start + i * step, 6) for i in range(max(n, 1))]
-
-def snr_at_bler(bler, snrs, target=0.1):
-    ps = pb = None
-    for s, b in zip(snrs, bler):
-        if ps is not None and pb > target >= b:
-            return ps + (pb - target) / (pb - b) * (s - ps)
-        ps, pb = s, b
-    return None
-def curve(ll, pc, snrs, batch, seed=0):
-    return [ll.block(batch, s, pc, seed=seed + i)[0] for i, s in enumerate(snrs)]
-
-
 
 def main() -> int:
-    p = argparse.ArgumentParser()
-    p.add_argument("--rank", type=int, default=1)
-    p.add_argument("--batch", type=int, default=256)
-    p.add_argument("--nsc", type=int, default=64)
-    p.add_argument("--qam", type=int, default=16)
+    p = argparse.ArgumentParser(description=__doc__)
+    p.add_argument("--rank", type=int, default=2)
+    p.add_argument("--batch", type=int, default=128)
+    p.add_argument("--channel", default="cdl", help="simple|tdl|cdl|uma|umi")
+    p.add_argument("--cdl-model", default="C")
+    p.add_argument("--trps", type=int, default=3)
+    p.add_argument("--bs-ant", type=int, default=32)
+    p.add_argument("--ue-ant", type=int, default=4)
+    p.add_argument("--qam", type=int, default=4)
     p.add_argument("--rate", type=float, default=0.5)
-    p.add_argument("--precoder", type=str, default="all", help="mrt|cjt|type1|all")
+    p.add_argument("--precoder", default="all", help="mrt|cjt|type1|all")
     p.add_argument("--cal-amp-error", type=float, default=0.1)
     p.add_argument("--cal-pha-error", type=float, default=0.1)
-    p.add_argument("--tau-ns", type=str, default="0,130,260")
-    p.add_argument("--granularity", type=str, default="SC", help="SC|RB|SC_RB_granular")
-    p.add_argument("--est-density", type=float, default=0.0,
-                   help="pilot density 0<d<1 enables DMRS-like LS estimation (0=perfect CSI)")
-    p.add_argument("--no-crc", action="store_true", help="plain LDPC + full-bit BLER instead of TB CRC")
-    p.add_argument("--pilot-boost-db", type=float, default=0.0, help="DMRS pilot energy boost (dB)")
-    p.add_argument("--n-symbols", type=int, default=14, help="OFDM symbols per slot")
-    p.add_argument("--dmrs-symbol", type=int, default=2, help="pilot-only DMRS symbol index")
-    p.add_argument("--num-dmrs-symbols", type=int, default=1, help="number of pilot-only DMRS symbols")
-    p.add_argument("--snr-start", type=float, default=-14.0, help="SNR sweep start (dB)")
-    p.add_argument("--snr-stop", type=float, default=8.0, help="SNR sweep stop (dB)")
-    p.add_argument("--snr-step", type=float, default=2.0, help="SNR sweep step (dB)")
-    p.add_argument("--sweep", action="store_true", help="rank1-4 SNR@10%% table")
-    args = p.parse_args()
+    p.add_argument("--tau-ns", default="0,130,260")
+    p.add_argument("--granularity", default="SC", help="SC|RB|SC_RB_granular")
+    p.add_argument("--no-crc", action="store_true")
+    p.add_argument("--perfect-csi", action="store_true")
+    p.add_argument("--pilot-boost-db", type=float, default=0.0)
+    p.add_argument("--n-symbols", type=int, default=14)
+    p.add_argument("--pilot-symbols", default="2,11")
+    p.add_argument("--fft-size", type=int, default=76)
+    p.add_argument("--ebno-start", type=float, default=-5.0)
+    p.add_argument("--ebno-stop", type=float, default=19.0)
+    p.add_argument("--ebno-step", type=float, default=4.0)
+    p.add_argument("--mc-iter", type=int, default=5)
+    p.add_argument("--out", default=None)
+    a = p.parse_args()
     torch.manual_seed(0)
     dev = "cuda:0" if torch.cuda.is_available() else "cpu"
-    tau = [float(x) * 1e-9 for x in args.tau_ns.split(",")]
-    args.rank = min(args.rank, 4)
-    args.snr_db = snr_range(args.snr_start, args.snr_stop, args.snr_step)
+    tau = [float(x) * 1e-9 for x in a.tau_ns.split(",")]
+    pilots = [int(x) for x in a.pilot_symbols.split(",")]
 
-    def mk(num_trps, err, ue_ant):
-        return build_link(num_trps=num_trps, num_tx_ant=4, num_ue_ant=ue_ant,
-                          n_subcarriers=args.nsc, channel_kind="uma", pathloss=False,
-                          trp_distances=[DIST[0]] if num_trps == 1 else DIST,
-                          tau_seconds=(tau if (err and num_trps > 1) else [0.0] * num_trps),
-                          cal_amp_error=(args.cal_amp_error if err else None),
-                          cal_pha_error=(args.cal_pha_error if err else None),
-                          granularity=args.granularity)
+    def mk(num_trps, err):
+        base = dict(num_trps=num_trps, num_bs_ant=a.bs_ant, num_ue_ant=a.ue_ant,
+                    channel_kind=a.channel, cdl_model=a.cdl_model,
+                    delay_spread=100e-9, speed=0.0, pathloss=False,
+                    trp_distances=[100.0] if num_trps == 1 else [100.0, 200.0, 350.0],
+                    granularity=a.granularity, subcarrier_spacing=15e3,
+                    fft_size=a.fft_size, num_guard_carriers=(5, 6), dc_null=True,
+                    n_symbols=a.n_symbols,
+                    pilot_ofdm_symbol_indices=pilots,
+                    pilot_boost_db=a.pilot_boost_db, cyclic_prefix_length=6,
+                    qam_order=a.qam, code_rate=a.rate, rank=a.rank,
+                    use_crc=not a.no_crc, perfect_csi=a.perfect_csi, device=dev)
+        if err and num_trps > 1:
+            base.update(tau_seconds=tau[:num_trps], cal_amp_error=a.cal_amp_error,
+                        cal_pha_error=a.cal_pha_error)
+        else:
+            base.update(tau_seconds=[0.0] * num_trps,
+                        cal_amp_error=None, cal_pha_error=None)
+        return DLModel(**base)
+
     precoders = {
-        "MRT": lambda r: IndependentMRT(rank=r),
-        "CJT": lambda r: CJTPrecoder(rank=r),
-        "TypeI-wide": lambda r: TypeICodebook(rank=r, subband_size=args.nsc),
+        "MRT": lambda: IndependentMRT(rank=a.rank),
+        "CJT": lambda: CJTPrecoder(rank=a.rank),
+        "TypeI-wide": lambda: TypeICodebook(rank=a.rank),
     }
-    sel = list(precoders) if args.precoder.lower() == "all" else \
-        [{"mrt": "MRT", "cjt": "CJT", "type1": "TypeI-wide", "typei": "TypeI-wide"}.get(args.precoder.lower(), args.precoder)]
-    return _run(args, mk, precoders, sel, dev)
+    sel = list(precoders) if a.precoder.lower() == "all" else \
+        [{"mrt": "MRT", "cjt": "CJT", "type1": "TypeI-wide",
+          "typei": "TypeI-wide"}.get(a.precoder.lower(), a.precoder)]
+    pcs = {name: precoders[name] for name in sel}
 
-def _run(args, mk, precoders, sel, dev):
-    r = args.rank
-    kw = dict(use_channel_estimation=args.est_density > 0.0,
-              est_density=max(args.est_density, 0.25), use_crc=not args.no_crc,
-              pilot_boost_db=args.pilot_boost_db, n_symbols=args.n_symbols,
-              dmrs_symbol=args.dmrs_symbol, num_dmrs_symbols=args.num_dmrs_symbols)
-    l1 = LinkLevelDMIMO(mk(1, False, r), qam_order=args.qam, code_rate=args.rate, rank=r, device=dev, **kw)
-    l0 = LinkLevelDMIMO(mk(3, False, r), qam_order=args.qam, code_rate=args.rate, rank=r, device=dev, **kw)
-    le = LinkLevelDMIMO(mk(3, True, r), qam_order=args.qam, code_rate=args.rate, rank=r, device=dev, **kw)
-    est = (f"LS(d={args.est_density}, pilot={l0.num_pilots}/{l0.n_data})"
-           if args.est_density > 0.0 else "perfect CSI")
-    print(f"rank={r} k/n={l0.k}/{l0.n} QAM={args.qam} rate={args.rate} "
-          f"tau(ns)={args.tau_ns} cal_amp={args.cal_amp_error} cal_pha={args.cal_pha_error}")
-    print(f"  CSI={est}  detect={'TB-CRC' if not args.no_crc else 'full-bit compare'}")
-    curves = {}
-    snrs = args.snr_db
-    pcs = {name: precoders[name](r) for name in sel}
-    t_start = time.time()
-    total_snr = len(snrs)
+    models = {"singleTRP": mk(1, False),
+              "3TRP-coherent": mk(a.trps, False),
+              "3TRP+err": mk(a.trps, True)}
+    me = models["3TRP+err"]
+    print(f"== DL DMIMO link-level: {a.channel}{a.cdl_model} {a.trps}TRP/{a.bs_ant}ant "
+          f"rank={a.rank} QAM{a.qam} rate={a.rate} ==")
+    print(f"  grid={a.n_symbols}sym x {a.fft_size}sc (eff {me.n_eff}) "
+          f"k={me.k} n={me.n}  CSI={'perfect' if a.perfect_csi else 'LS'}")
+    print(f"  tau(ns)={a.tau_ns} cal={a.cal_amp_error}/{a.cal_pha_error}")
 
-    for i, s in enumerate(snrs):
-        res1 = l1.evaluate_many(args.batch, s, pcs, seed=i)
-        res0 = l0.evaluate_many(args.batch, s, pcs, seed=i)
-        rese = le.evaluate_many(args.batch, s, pcs, seed=i)
-        for name in sel:
-                    curves.setdefault(f"{name} singleTRP", []).append(res1[name][0])
-                    curves.setdefault(f"{name} 3TRP coherent", []).append(res0[name][0])
-                    curves.setdefault(f"{name} 3TRP+err", []).append(rese[name][0])
-        elapsed = time.time() - t_start
-        avg = elapsed / (i + 1)
-        eta = avg * (total_snr - i - 1)
-        print(
-            f"  [SNR {i + 1:2d}/{total_snr}] {s:6.1f} dB done "
-            f"({elapsed:7.1f}s elapsed, ETA {eta:7.1f}s)",
-            flush=True,
-        )
-    print("  SNR   | " + " | ".join(f"{n:>20}" for n in curves))
-    for i, s in enumerate(snrs):
-        print(f"  {s:4g} | " + " | ".join(f"{curves[n][i]:20.3f}" for n in curves))
+    n = int((a.ebno_stop - a.ebno_start) / a.ebno_step + 1e-9) + 1
+    ebno_list = [round(a.ebno_start + i * a.ebno_step, 6) for i in range(max(n, 1))]
+    variants = {vname: {pc: [] for pc in pcs} for vname in models}
+    snr_list = []
+    t0 = time.time()
+    for i, ebno in enumerate(ebno_list):
+        print(f"\n  [Eb/N0 {i + 1:2d}/{len(ebno_list)}] {ebno:6.1f} dB", flush=True)
+        for vname, model in models.items():
+            res = sim_ber_many(model, ebno,
+                               {pc: {"precoder": pcs[pc]()} for pc in pcs},
+                               batch_size=a.batch, max_mc_iter=a.mc_iter,
+                               num_target_block_errors=1000, target_bler=1e-3,
+                               seed=i, device=dev, verbose=False,
+                               on_batch=lambda it, tot, eb, stats, vname=vname: print(
+                                   f"    [{vname} iter {it:2d}/{tot}] "
+                                   + "  ".join(f"{n}={s['bler']:.3f}"
+                                               for n, s in stats.items()),
+                                   flush=True))
+            for pc, (bler, _ber, _k) in res.items():
+                variants[vname][pc].append(bler)
+        from sionna.phy.utils import ebnodb2no
+        no = float(ebnodb2no(ebno, me.bits_sym, me.code_rate, me.rg))
+        snr_list.append(-10.0 * torch.log10(torch.tensor(no)).item())
+        el = time.time() - t0
+        print(f"    ({el:5.1f}s, ETA {el / (i + 1) * (len(ebno_list) - i - 1):5.1f}s)",
+              flush=True)
 
-    fig, ax = plt.subplots(figsize=(10, 6))
-    for n, ys in curves.items():
-        ax.plot(snrs, ys, "o-", label=n)
-    ax.axhline(0.1, color="grey", ls="--", lw=1, label="10% BLER")
-    ax.set_yscale("log"); ax.set_xlabel("SNR (dB)"); ax.set_ylabel("BLER")
-    ax.grid(True, which="both", alpha=0.3); ax.legend(fontsize=8); fig.tight_layout()
-    out_dir = os.path.join(common.ROOT, "out", "dmimo")
-    os.makedirs(out_dir, exist_ok=True)
-    out = _stamp(os.path.join(out_dir, f"linklevel_bler_rank{r}.png"))
-    fig.savefig(out, dpi=150)
-    print("Saved BLER figure ->", out)
-    import csv
+    curves = {f"{pc} {vname}": variants[vname][pc]
+              for vname in models for pc in pcs}
+    final = {"ebno_db": ebno_list, "snr_db": snr_list,
+             "curves": curves, "ber": {n: [0.0] * len(ebno_list) for n in curves},
+             "k": me.k}
+    print("\n===== BLER =====")
+    print_curve_table(final)
 
-    csv_path = os.path.splitext(out)[0] + ".csv"
-    with open(csv_path, "w", newline="", encoding="utf-8") as fh:
-        writer = csv.writer(fh)
-        writer.writerow(["snr_db"] + list(curves.keys()))
-        for i, s in enumerate(snrs):
-            writer.writerow([s] + [curves[n][i] for n in curves])
-    print("Saved CSV ->", csv_path)
-
-
-    if args.sweep:
-        coarse = [-10, -6, -2, 2, 6, 10]
-        print("== SNR@10% BLER across rank 1-4 ==")
-        print("  rank | " + " | ".join(f"{n:>18}" for n in ["MRTcoh", "MRT+err", "CJT+err", "TypeI-wide+err"]))
-        for rr in range(1, 5):
-            L0 = LinkLevelDMIMO(mk(3, False, rr), qam_order=args.qam, code_rate=args.rate, rank=rr, device=dev, **kw)
-            Le = LinkLevelDMIMO(mk(3, True, rr), qam_order=args.qam, code_rate=args.rate, rank=rr, device=dev, **kw)
-            fm = lambda v: "-" if v is None else f"{v:6.2f}"
-            mc = snr_at_bler(curve(L0, IndependentMRT(rank=rr), coarse, 128), coarse)
-            row = [mc] + [snr_at_bler(curve(Le, precoders[n](rr), coarse, 128), coarse) for n in ["MRT", "CJT", "TypeI-wide"]]
-            print(f"  {rr:4d} | " + " | ".join(f"{fm(v):>18}" for v in row))
+    tag = (f"{a.channel}{a.cdl_model}_{a.trps}trp_rank{a.rank}_{a.fft_size}sc_"
+           f"qam{a.qam}_r{a.rate:.2f}").replace(".", "")
+    meta = {"direction": "downlink", "channel_kind": a.channel,
+            "cdl_model": a.cdl_model, "num_trps": a.trps,
+            "rank": a.rank, "qam_order": a.qam, "code_rate": a.rate,
+            "perfect_csi": a.perfect_csi, "tau_ns": a.tau_ns,
+            "title": f"DL DMIMO BLER ({tag})"}
+    out = a.out or _stamp(os.path.join(common.ROOT, "out", "dmimo",
+                                       f"linklevel_{tag}.png"))
+    paths = save_curves(out, final, meta)
+    print("Saved ->", paths["png"])
+    print("Saved ->", paths["csv"])
+    print("Saved ->", paths["json"])
     return 0
 
 
 if __name__ == "__main__":
     sys.exit(main())
-

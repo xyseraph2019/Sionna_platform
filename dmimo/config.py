@@ -49,10 +49,29 @@ class DMIMOConfig:
     snr_start_db: float = -24.0               # SNR sweep range (dB)
     snr_stop_db: float = -2.0
     snr_step_db: float = 2.0
+    ebno_db: Optional[List[float]] = None     # explicit Eb/N0 list (dB); None -> ebno_start/stop/step
+    ebno_start_db: float = -5.0               # Eb/N0 sweep range (dB)
+    ebno_stop_db: float = 19.0
+    ebno_step_db: float = 4.0
     num_trials: int = 256
     num_mc_batches: int = 1       # 每个 SNR 下跑的蒙特卡洛批次数（每批 num_trials 个 TB）
     device: str = "auto"
     seed: int = 0
+    # ---- 链路级新模型（DLModel / ULModel，Sionna Block 风格）----
+    domain: str = "freq"                      # freq | time（time 为预留扩展点）
+    perfect_csi: bool = False                 # 接收端完美 CSI（否则 DMRS LS 估计）
+    fft_size: int = 76                        # 全 FFT 子载波数（含 guard/DC）
+    num_guard_carriers: Tuple[int, int] = (5, 6)   # 左右 guard 子载波数
+    dc_null: bool = True                      # DC 子载波置零
+    cyclic_prefix_length: int = 6             # CP 长度（频域建模仅影响 Eb/N0 折算）
+    pilot_ofdm_symbol_indices: Tuple[int, ...] = (2, 11)  # DMRS 导频符号索引
+    speed: float = 0.0                        # UE 速度 m/s（信道老化；0=静态）
+    delay_spread_ns: float = 100.0            # CDL/TDL 名义时延扩展 [ns]
+    target_bler: float = 1e-3                 # sim_ber 提前停止目标 BLER
+    num_target_block_errors: int = 1000       # sim_ber 提前停止块错误数
+    max_mc_iter: int = 100                    # sim_ber 每 SNR 最大 MC 迭代数
+    combiner: str = "joint"                   # UL: joint|symbol|llr
+    estimate_errors: bool = True              # UL: 均衡信道是否吸收接收误差
 
     @property
     def snr_grid(self) -> List[float]:
@@ -69,8 +88,32 @@ class DMIMOConfig:
         return [round(self.snr_start_db + i * self.snr_step_db, 6) for i in range(n)]
 
     @property
+    def ebno_grid(self) -> List[float]:
+        """Eb/N0 sweep points in dB (default ``-5 .. 19``, step 4, like the
+        Sionna CDL tutorial)."""
+        if self.ebno_db is not None:
+            return list(self.ebno_db)
+        if self.ebno_step_db <= 0:
+            raise ValueError("ebno_step_db must be > 0.")
+        n = max(int(math.floor((self.ebno_stop_db - self.ebno_start_db) / self.ebno_step_db + 1e-9)) + 1, 1)
+        return [round(self.ebno_start_db + i * self.ebno_step_db, 6) for i in range(n)]
+
+    @property
     def tau_seconds(self) -> Tuple[float, ...]:
         return tuple(t * 1e-9 for t in self.tau_ns)
+
+    @property
+    def delay_spread(self) -> float:
+        return self.delay_spread_ns * 1e-9
+
+    @property
+    def pilot_symbols(self) -> Tuple[int, ...]:
+        """DMRS pilot symbol indices (explicit list, or derived from
+        ``dmrs_symbol`` + ``num_dmrs_symbols`` for backward compatibility)."""
+        if self.pilot_ofdm_symbol_indices:
+            return tuple(int(i) % self.n_symbols for i in self.pilot_ofdm_symbol_indices)
+        return tuple((self.dmrs_symbol + i) % self.n_symbols
+                     for i in range(self.num_dmrs_symbols))
 
     def build_link(self):
         """Build a :class:`~dmimo.link.DMIMODownlink` from this config."""
@@ -86,34 +129,87 @@ class DMIMOConfig:
                           carrier_frequency=self.carrier_frequency,
                            cdl_model=self.cdl_model, tdl_model=self.tdl_model)
 
+    # ------------------------------------------------------------------
+    # Link-level models (Sionna Block style, see dmimo.model)
+    # ------------------------------------------------------------------
+    def build_dl_model(self, device: Optional[str] = None):
+        """Build a :class:`~dmimo.model.DLModel` from this config."""
+        from .model import DLModel
+
+        return DLModel(
+            num_trps=self.num_trps, num_bs_ant=self.num_tx_ant,
+            num_ue_ant=self.num_ue_ant, channel_kind=self.channel_kind,
+            cdl_model=self.cdl_model, tdl_model=self.tdl_model,
+            delay_spread=self.delay_spread, speed=self.speed,
+            pathloss=self.pathloss, trp_distances=self.trp_distances_m,
+            carrier_frequency=self.carrier_frequency,
+            tau_seconds=self.tau_seconds, cal_amp_error=self.cal_amp_error,
+            cal_pha_error=self.cal_pha_error, granularity=self.granularity,
+            subcarrier_spacing=self.subcarrier_spacing_khz * 1e3,
+            fft_size=self.fft_size, num_guard_carriers=self.num_guard_carriers,
+            dc_null=self.dc_null, n_symbols=self.n_symbols,
+            pilot_ofdm_symbol_indices=self.pilot_symbols,
+            pilot_boost_db=self.pilot_boost_db,
+            cyclic_prefix_length=self.cyclic_prefix_length,
+            qam_order=self.qam_order, code_rate=self.code_rate,
+            rank=self.rank, use_crc=self.use_crc,
+            perfect_csi=self.perfect_csi, device=device)
+
+    def build_ul_model(self, device: Optional[str] = None):
+        """Build a :class:`~dmimo.model.ULModel` from this config."""
+        from .model import ULModel
+
+        return ULModel(
+            num_trps=self.num_trps, num_bs_ant=self.num_tx_ant,
+            num_ue_ant=self.num_ue_ant, channel_kind=self.channel_kind,
+            cdl_model=self.cdl_model, tdl_model=self.tdl_model,
+            delay_spread=self.delay_spread, speed=self.speed,
+            pathloss=self.pathloss, trp_distances=self.trp_distances_m,
+            carrier_frequency=self.carrier_frequency,
+            tau_seconds=self.tau_seconds, cal_amp_error=self.cal_amp_error,
+            cal_pha_error=self.cal_pha_error, granularity=self.granularity,
+            subcarrier_spacing=self.subcarrier_spacing_khz * 1e3,
+            fft_size=self.fft_size, num_guard_carriers=self.num_guard_carriers,
+            dc_null=self.dc_null, n_symbols=self.n_symbols,
+            pilot_ofdm_symbol_indices=self.pilot_symbols,
+            pilot_boost_db=self.pilot_boost_db,
+            cyclic_prefix_length=self.cyclic_prefix_length,
+            qam_order=self.qam_order, code_rate=self.code_rate,
+            use_crc=self.use_crc, perfect_csi=self.perfect_csi,
+            combiner=self.combiner, estimate_errors=self.estimate_errors,
+            device=device)
+
 
 def _coerce(name, v):
-    if name in ("trp_distances_m", "tau_ns"):
+    if name in ("trp_distances_m", "tau_ns", "pilot_ofdm_symbol_indices", "num_guard_carriers"):
         try:
-            return tuple(float(x) for x in v)
+            return tuple(float(x) if name in ("trp_distances_m", "tau_ns") else int(x) for x in v)
         except (TypeError, ValueError):
             return v
-    if name == "snr_db":
+    if name in ("snr_db", "ebno_db"):
         try:
             return [float(x) for x in v]
         except (TypeError, ValueError):
             return v
     if name in ("num_trps", "num_tx_ant", "num_ue_ant", "n_subcarriers", "qam_order", "rank",
                 "n_symbols", "dmrs_symbol", "num_dmrs_symbols", "num_trials",
-                "num_mc_batches", "seed", "subband_size",
+                "num_mc_batches", "seed", "subband_size", "fft_size",
+                "cyclic_prefix_length", "num_target_block_errors", "max_mc_iter",
                 "feedback_bits_phase", "feedback_bits_iq", "feedback_subband_size"):
         try:
             return int(v)
         except (TypeError, ValueError):
             return v
     if name in ("subcarrier_spacing_khz", "carrier_frequency", "cal_amp_error", "cal_pha_error",
-                "code_rate", "est_density", "pilot_boost_db",
-                "snr_start_db", "snr_stop_db", "snr_step_db"):
+                "code_rate", "est_density", "pilot_boost_db", "speed", "delay_spread_ns",
+                "target_bler", "snr_start_db", "snr_stop_db", "snr_step_db",
+                "ebno_start_db", "ebno_stop_db", "ebno_step_db"):
         try:
             return float(v)
         except (TypeError, ValueError):
             return v
-    if name in ("use_channel_estimation", "use_crc", "feedback_ste"):
+    if name in ("use_channel_estimation", "use_crc", "feedback_ste", "perfect_csi",
+                "dc_null", "estimate_errors"):
         if isinstance(v, str):
             return v.strip().lower() in ("1", "true", "yes", "on")
         return bool(v)

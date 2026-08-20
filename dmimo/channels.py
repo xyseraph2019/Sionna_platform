@@ -43,15 +43,16 @@ def _resource_grid(n_subcarriers, subcarrier_spacing):
                         num_guard_carriers=[0, 0])
 
 
-def _panel(num_elements, carrier_frequency):
+def _panel(num_elements, carrier_frequency, device=None):
     from sionna.phy.channel.tr38901 import PanelArray
 
     return PanelArray(num_rows_per_panel=1, num_cols_per_panel=int(num_elements),
                       polarization="single", polarization_type="V",
-                      antenna_pattern="omni", carrier_frequency=carrier_frequency)
+                      antenna_pattern="omni", carrier_frequency=carrier_frequency,
+                      device=device)
 
 
-def _panel_dual(num_ant_per_pol, carrier_frequency):
+def _panel_dual(num_ant_per_pol, carrier_frequency, device=None):
     """Dual-polarised ULA: ``num_ant_per_pol`` columns x 2 pol = 2*P antennas.
 
     Used for the TRP arrays so the Type I codebook's co-phasing between the two
@@ -61,7 +62,8 @@ def _panel_dual(num_ant_per_pol, carrier_frequency):
 
     return PanelArray(num_rows_per_panel=1, num_cols_per_panel=int(num_ant_per_pol),
                       polarization="dual", polarization_type="VH",
-                      antenna_pattern="omni", carrier_frequency=carrier_frequency)
+                      antenna_pattern="omni", carrier_frequency=carrier_frequency,
+                      device=device)
 
 
 class DownlinkChannel(nn.Module):
@@ -249,4 +251,156 @@ def build_downlink_channel(kind="uma", **kw):
     # `beta` only applies to the "simple" channel; drop it for Sionna builders.
     kw.pop("beta", None)
     return SionnaDownlinkChannel(kind=kind, **kw)
+
+
+# ---------------------------------------------------------------------------
+# Link-level grid channel interface (Sionna channel-tensor convention)
+# ---------------------------------------------------------------------------
+
+class DMIMOChannel(nn.Module):
+    """Frequency-domain grid channel in Sionna's channel-tensor convention.
+
+    Produces the *downlink* channel
+    ``h : [B, num_rx=1, num_ue_ant, num_tx=K, num_bs_ant, n_sym, fft]``
+    (1 UE, K TRPs). The uplink channel is obtained by reciprocity
+    (``h.permute(0, 3, 4, 1, 2, 5, 6)`` → ``[B, K, num_bs_ant, 1, num_ue_ant,
+    n_sym, fft]``).
+
+    Channel sources (``kind``):
+
+      * ``"simple"`` — i.i.d. Rayleigh, frequency-flat, static across symbols
+        (fast verification baseline);
+      * ``"cdl"`` — one Sionna ``CDL`` per TRP; the CIR is sampled once per
+        OFDM symbol (symbol-rate sampling) and converted with
+        ``cir_to_ofdm_channel`` — the Sionna CDL tutorial pipeline. A nonzero
+        ``speed`` makes the channel vary across symbols (channel aging);
+      * ``"tdl"`` — one Sionna ``TDL`` per TRP (same CIR pipeline);
+      * ``"uma"`` / ``"umi"`` — Sionna system-level model with K TRPs + 1 UE
+        (static across symbols; topology rebuilt when the batch size changes).
+
+    Per-TRP pathloss (``pathloss=True``) is applied for ``cdl``/``tdl`` via an
+    external large-scale model, and the channel is normalised so the strongest
+    TRP has unit mean power (coverage ratios preserved).
+    """
+
+    def __init__(self, kind="cdl", num_trps=3, num_bs_ant=8, num_ue_ant=4,
+                 fft_size=76, subcarrier_spacing=30e3, carrier_frequency=3.5e9,
+                 delay_spread=100e-9, cdl_model="A", tdl_model="C", speed=0.0,
+                 pathloss=False, trp_distances=(100.0, 200.0, 350.0),
+                 shadow_fading=True, bs_height=25.0, beta=None, device=None):
+        super().__init__()
+        kind = kind.lower()
+        assert kind in ("simple", "cdl", "tdl", "uma", "umi"), f"unknown kind {kind}"
+        self.kind = kind
+        self.k = int(num_trps)
+        self.nt = int(num_bs_ant)
+        self.d = int(num_ue_ant)
+        self.n = int(fft_size)
+        self.speed = float(speed)
+        self.pathloss = bool(pathloss)
+        self.subcarrier_spacing = float(subcarrier_spacing)
+        self.carrier_frequency = float(carrier_frequency)
+        self.delay_spread = float(delay_spread)
+        self.trp_distances = [float(x) for x in trp_distances]
+        self.shadow_fading = bool(shadow_fading)
+        self._bs_height = float(bs_height)
+        self.device = device
+
+        if kind == "simple":
+            if beta is None:
+                beta = [1.0] * self.k
+            self.register_buffer("beta", torch.as_tensor(list(beta), dtype=torch.float32))
+            self._models = None
+        elif kind in ("uma", "umi"):
+            self._models = SionnaDownlinkChannel(
+                kind=kind, num_trps=self.k, num_tx_ant=self.nt, num_ue_ant=self.d,
+                n_subcarriers=self.n, subcarrier_spacing=self.subcarrier_spacing,
+                carrier_frequency=self.carrier_frequency, pathloss=self.pathloss,
+                trp_distances=self.trp_distances, shadow_fading=self.shadow_fading,
+                delay_spread=self.delay_spread, cdl_model=cdl_model,
+                tdl_model=tdl_model, bs_height=self._bs_height)
+        else:
+            from sionna.phy.channel.tr38901 import CDL, TDL
+
+            self._models = []
+            for _t in range(self.k):
+                if kind == "cdl":
+                    if self.nt % 2:
+                        raise ValueError("CDL requires an even number of BS "
+                                         "antennas (dual-pol array).")
+                    bs = _panel_dual(self.nt // 2, self.carrier_frequency, device)
+                    ut = _panel(self.d, self.carrier_frequency, device)
+                    model = CDL(model=cdl_model, delay_spread=self.delay_spread,
+                                carrier_frequency=self.carrier_frequency,
+                                ut_array=ut, bs_array=bs, direction="downlink",
+                                min_speed=self.speed, max_speed=self.speed,
+                                device=device)
+                else:
+                    model = TDL(model=tdl_model, delay_spread=self.delay_spread,
+                                carrier_frequency=self.carrier_frequency,
+                                min_speed=self.speed, max_speed=self.speed,
+                                num_rx_ant=self.d, num_tx_ant=self.nt,
+                                device=device)
+                self._models.append(model)
+            if self.pathloss:
+                self.register_buffer(
+                    "beta", _pathloss_gain(self.trp_distances, self.carrier_frequency))
+
+    @property
+    def frequencies(self) -> torch.Tensor:
+        """Subcarrier frequencies of the full FFT grid (incl. guard / DC carriers)."""
+        from sionna.phy.channel import subcarrier_frequencies
+
+        return subcarrier_frequencies(self.n, self.subcarrier_spacing, device=self.device)
+
+    def sample(self, batch_size, num_ofdm_symbols, ofdm_symbol_duration, device=None):
+        """Downlink grid channel ``h : [B, 1, D, K, Nt, n_sym, fft]``.
+
+        Parameters
+        ----------
+        batch_size : int
+        num_ofdm_symbols : int
+            Number of OFDM symbols (time samples taken once per symbol).
+        ofdm_symbol_duration : float
+            Seconds per OFDM symbol incl. cyclic prefix (defines the CIR
+            sampling frequency ``1/ofdm_symbol_duration``).
+        device : str | None
+        """
+        B = int(batch_size)
+        n_sym = int(num_ofdm_symbols)
+        device = device or self.device
+        if self.kind == "simple":
+            real = torch.randn(B, 1, self.d, self.k, self.nt, 1, self.n, device=device)
+            imag = torch.randn(B, 1, self.d, self.k, self.nt, 1, self.n, device=device)
+            h = (real + 1j * imag) / (2.0 ** 0.5)
+            h = h * self.beta.to(device).view(1, 1, 1, self.k, 1, 1, 1)
+            return h.expand(B, 1, self.d, self.k, self.nt, n_sym, self.n).contiguous()
+        if self.kind in ("uma", "umi"):
+            h = self._models.sample(B, device)          # [B, K, D, Nt, N] static
+            h = h.permute(0, 2, 1, 3, 4).unsqueeze(5)   # [B, D, K, Nt, 1, N]
+            h = h.unsqueeze(1)                           # [B, 1, D, K, Nt, 1, N]
+            return h.expand(B, 1, self.d, self.k, self.nt, n_sym, self.n).contiguous()
+        # CDL / TDL: CIR sampled once per OFDM symbol -> channel frequency response.
+        from sionna.phy.channel import cir_to_ofdm_channel
+
+        f = self.frequencies.to(device)
+        parts = []
+        for t, model in enumerate(self._models):
+            a, tau = model(B, n_sym, 1.0 / float(ofdm_symbol_duration))
+            # a: [B, 1, D, 1, Nt, P, n_sym]; tau: [B, 1, 1, P]
+            ht = cir_to_ofdm_channel(f, a, tau, normalize=True)   # [B,1,D,1,Nt,n_sym,N]
+            parts.append(ht)
+        h = torch.cat(parts, dim=3)                      # [B,1,D,K,Nt,n_sym,N]
+        if self.pathloss:
+            b = self.beta.to(h.device).view(1, 1, 1, self.k, 1, 1, 1)
+            h = h * b.sqrt()
+            ref = h.abs().square().mean(dim=(0, 2, 4, 5, 6))   # per-TRP mean power
+            h = h / (ref.max().sqrt() + 1e-12)                 # strongest TRP -> unit
+        return h.contiguous()
+
+    def sample_uplink(self, batch_size, num_ofdm_symbols, ofdm_symbol_duration,
+                      device=None) -> torch.Tensor:
+        """Uplink grid channel ``h_ul : [B, K, Nt, 1, D, n_sym, fft]`` (reciprocity)."""
+        h = self.sample(batch_size, num_ofdm_symbols, ofdm_symbol_duration, device)
+        return h.permute(0, 3, 4, 1, 2, 5, 6).contiguous()
 

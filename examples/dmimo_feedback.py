@@ -56,6 +56,7 @@ def main() -> int:
     p.add_argument("--bits", default="2,3,4,6,8", help="比特预算列表（逗号分隔）")
     p.add_argument("--batch", type=int, default=256)
     p.add_argument("--snr-db", type=float, default=0.0, help="速率评估 SNR (dB)")
+    p.add_argument("--ebno-db", type=float, default=0.0, help="链路级 BLER 评估 Eb/N0 (dB)")
     p.add_argument("--bler", action="store_true", help="额外跑链路级 BLER（3TRP+err @ --snr-db）")
     p.add_argument("--out", default=None, help="输出目录（默认 out/dmimo/fb/<tag>_<quant>）")
     a = p.parse_args()
@@ -203,27 +204,31 @@ def main() -> int:
 
     # ================= 链路级 BLER（可选）=================
     if a.bler:
-        from dmimo import LinkLevelDMIMO
+        from dmimo import sim_ber_many
 
-        ll = LinkLevelDMIMO(le, qam_order=c.qam_order, code_rate=c.code_rate,
-                            rank=c.rank, use_channel_estimation=c.use_channel_estimation,
-                            est_density=c.est_density, use_crc=c.use_crc,
-                            pilot_boost_db=c.pilot_boost_db, n_symbols=c.n_symbols,
-                            dmrs_symbol=c.dmrs_symbol,
-                            num_dmrs_symbols=c.num_dmrs_symbols, device=dev)
-        print(f"\n== 链路级 BLER @ {a.snr_db} dB（evaluate_many 共享信道/比特）==")
+        # 3TRP+err 链路级模型（Sionna Block 风格，DLModel）
+        ll = c.build_dl_model(device=dev)
+        print(f"\n== 链路级 BLER @ {a.ebno_db} dB Eb/N0（sim_ber_many 共享信道/比特）==")
         bler_rows = []
         for b in bits_list:
             qz = make_quantizer(b)
             qpcs = {n: QuantizedFeedback(f(), qz, subband_size=fb_sub)
                     for n, f in base_factories.items()}
-            res = ll.evaluate_many(a.batch, a.snr_db, qpcs)
+            res = sim_ber_many(ll, a.ebno_db,
+                               {n: {"precoder": pc} for n, pc in qpcs.items()},
+                               batch_size=a.batch, max_mc_iter=1,
+                               num_target_block_errors=1000, target_bler=1e-3,
+                               seed=c.seed, device=dev, verbose=False)
             row = {"bits": b}
             for n in qpcs:
                 row[n] = res[n][0]
             bler_rows.append(row)
             print(f"  bits={b:>2d}  " + "  ".join(f"{n}={row[n]:.4f}" for n in qpcs))
-        ref_res = ll.evaluate_many(a.batch, a.snr_db, ref_pcs)
+        ref_res = sim_ber_many(ll, a.ebno_db,
+                               {n: {"precoder": f()} for n, f in refs.items()},
+                               batch_size=a.batch, max_mc_iter=1,
+                               num_target_block_errors=1000, target_bler=1e-3,
+                               seed=c.seed, device=dev, verbose=False)
         print("  参考: " + "  ".join(f"{n}={ref_res[n][0]:.4f}" for n in refs))
 
         bler_csv = os.path.join(out_dir, f"bler_{tag}.csv")

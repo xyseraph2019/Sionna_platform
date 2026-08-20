@@ -15,7 +15,9 @@ from .link import (
     save_dataset,
     load_dataset,
 )
-from .link_level import LinkLevelDMIMO
+from .model import DMIMOPhyModel, DLModel, ULModel
+from .sim import sim_ber_many, sim_ber_curve
+from .results import save_curves, print_curve_table
 from .modelDesign import MLPMixerSubbandPMI
 from .nn_pmi import (
     NNMixerPMI,
@@ -43,7 +45,6 @@ from .uplink import (
     build_ulink,
     evaluate_ulink,
 )
-from .uplink_level import ULinkLevelDMIMO
 
 __all__ = [
     "DMIMMetrics",
@@ -53,7 +54,15 @@ __all__ = [
     "generate_dataset",
     "save_dataset",
     "load_dataset",
-    "LinkLevelDMIMO",
+    # ---- link-level models (Sionna Block style) ----
+    "DMIMOPhyModel",
+    "DLModel",
+    "ULModel",
+    "sim_ber_many",
+    "sim_ber_curve",
+    "save_curves",
+    "print_curve_table",
+    # ---- machine-learning / precoding / feedback ----
     "MLPMixerSubbandPMI",
     "NNMixerPMI",
     "wideband_pmi",
@@ -69,9 +78,9 @@ __all__ = [
     "ScalarQuantizer",
     "QuantizedFeedback",
     "make_quantized",
+    # ---- system-level (rate) uplink ----
     "UDMIMMetrics",
     "UDMIMOLink",
     "build_ulink",
     "evaluate_ulink",
-    "ULinkLevelDMIMO",
 ]

@@ -1,0 +1,44 @@
+# Uplink DMIMO link-level scenario (used by examples/udmimo_linklevel.py)
+# Sionna Block-style model: ULModel (see dmimo/model.py)
+channel_kind: "cdl"        # simple | tdl | cdl | uma | umi
+cdl_model: "A"            # CDL 模型：A/B/C/D/E（channel_kind=cdl 时生效）
+tdl_model: "C"            # TDL 模型：A/B/C/D/E（channel_kind=tdl 时生效）
+num_trps: 3
+num_tx_ant: 8             # 每 TRP 接收天线数（CDL 需偶数）
+num_ue_ant: 4             # UE 发射天线数（rank=1 开环发射）
+fft_size: 76              # 全 FFT 子载波数（含 guard/DC）
+num_guard_carriers: [5, 6]
+dc_null: true
+subcarrier_spacing_khz: 15.0
+carrier_frequency: 2.6e9
+pathloss: false
+
+trp_distances_m: [100, 200, 350]
+tau_ns: [0, 130, 260]      # 每 TRP 接收定时误差 (ns)，TRP0=0
+cal_amp_error: 0.1         # None -> no calibration error
+cal_pha_error: 0.1
+granularity: "SC"
+
+qam_order: 4               # 4=QPSK
+code_rate: 0.5
+perfect_csi: false         # false：DMRS LS 估计
+n_symbols: 14
+pilot_ofdm_symbol_indices: [2, 11]
+pilot_boost_db: 0.0
+cyclic_prefix_length: 6
+speed: 0.0
+use_crc: true
+
+# 合并层级：joint（L1 联合检测）/ symbol（L2 均衡后合并）/ llr（L3 LLR 合并）
+combiner: "all"            # all | joint | symbol | llr
+estimate_errors: true      # 均衡信道吸收接收误差（true）；false=未补偿（用干净信道）
+
+ebno_start_db: -5
+ebno_stop_db: 19
+ebno_step_db: 4
+num_trials: 128
+num_mc_batches: 5
+target_bler: 1e-3
+num_target_block_errors: 1000
+device: "auto"
+seed: 0

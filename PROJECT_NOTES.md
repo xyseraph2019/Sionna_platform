@@ -5,12 +5,12 @@
 
 ## 1. 工作环境限制
 
-- 当前对话环境中，AI 无法执行终端命令（Windows 下无 shell 通道）。
-- AI 能做的事：
-  - 阅读代码
-  - 修改代码
-  - 给出运行/调试/重构方案
-- 需要用户在本机运行并回传报错。
+- 早期会话中 AI 无法执行终端命令（Windows 下无 shell 通道），只能读改代码、
+  由用户本机运行回传报错。
+- **更新**：后续会话已具备 pwsh 通道，可运行 Python（项目运行环境为 conda
+  `pytorch2`：`C:\Users\xyseraph\anaconda3\envs\pytorch2\python.exe`，
+  Python 3.11 + torch 2.13.0+cu126 + sionna 2.0.1，有 CUDA）。验证用 `--device cpu`，
+  正式跑仿真用 CUDA。
 
 ## 2. 项目结构约定
 
@@ -37,10 +37,11 @@
   - 同一 SNR 下使用同一份信道
   - 同一份信息比特
   - 同一份噪声/误差
-- 推荐使用 `LinkLevelDMIMO.evaluate_many(..., on_batch=...)` 的结构：
-  - 每个 SNR 只采样一次 channel + bits
-  - 所有 precoder 共用这份数据
-  - 可多 batch 累积，例如 `num_mc_batches`
+- 推荐使用 `dmimo.sim.sim_ber_many(model, ebno_db, configs, ...)` 的结构：
+  - 每个 MC 批只采样一次 channel + bits（`model.sample_realization`）
+  - 所有 precoder / combiner 配置共用这份数据（`model.block_from_realization`）
+  - `on_batch` 回调提供逐批进度；target-BLER 提前停止（sim_ber 规则）
+  - 每 SNR 点可多批累积（`num_mc_batches`）
 
 ## 5. 进度与结果输出
 
@@ -87,6 +88,31 @@
   - simple / tdl / cdl / uma / umi
   - rank 1 / 2 / 3 / 4
   - 有误差 / 无误差
-  - 不同 SNR
-- 统一 `dmimo_linklevel.py` 和 `dmimo_linklevel_cfg.py` 的进度/保存逻辑。
-- 将多 PMI 对比抽成公共模块，避免两个脚本重复实现。
+  - 不同 Eb/N0
+- 进度/保存逻辑已统一到 `dmimo/sim.py`（sim_ber_many）与 `dmimo/results.py`
+  （save_curves：PNG + CSV + JSON，Eb/N0 与 SNR 双轴），后续示例只负责组装配置。
+- 多 PMI 对比的公平采样已内置在 `sim_ber_many`，新脚本直接复用即可。
+
+## 10. 链路级重构记录（Sionna Block 风格，2026）
+
+以示例 Notebook `tutorials/phy/MIMO_OFDM_Transmissions_over_CDL.ipynb` 的结构
+重构 UL/DL DMIMO 链路级代码：
+
+- 新增 `dmimo/model.py`：`DMIMOPhyModel(Block)` 基类 + `DLModel` / `ULModel`。
+  - 入口 `call(batch_size, ebno_db) -> (b, b_hat)`（教程风格）；
+  - 噪声用 `ebnodb2no`（Eb/N0 轴，计入码率/调制/导频/置零开销）；
+  - 信道 CIR 驱动：`dmimo/channels.py::DMIMOChannel` 逐 OFDM 符号采样
+    CDL/TDL CIR → `cir_to_ofdm_channel`（`simple` 为频域平坦特例）；
+    `domain="time"` 为预留扩展点（`cir_to_time_channel` + 调制/解调）；
+  - DL：每 TRP 频域预编码（MRT/CJT/TypeI/NN-PMI/量化反馈），UE 相干合并；
+    UL：K TRP 接收，joint / symbol / llr 三层合并，`estimate_errors` 语义保留。
+- 新增 `dmimo/sim.py`：`sim_ber_many`（公平共享 + 提前停止 + 进度）、`sim_ber_curve`。
+- 新增 `dmimo/results.py`：`save_curves` / `print_curve_table`。
+- 删除旧 `dmimo/link_level.py` / `dmimo/uplink_level.py`（直接替换，调用点已同步更新）。
+- 系统级 rate 模型（`dmimo/link.py` / `dmimo/uplink.py`）保持不变。
+- 注意事项：
+  - `ResourceGrid` 的自定义导频模式在 guard/DC 下与 `num_data_symbols` 计数不一致
+    （Sionna 2.0.1），故 rank>=2 的交错梳状导频仅用于无 guard/DC 的旧配置，
+    教程风格配置（guard/DC）一律用 Kronecker 导频（计数一致）。
+  - `Block` 自带只读 `device` 属性，模型内部设备存 `_device`。
+  - 误差模型 `TRPErrorModel` 的 `tau_seconds` 长度必须等于 `num_trps`（已校验）。

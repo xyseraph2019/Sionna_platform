@@ -121,31 +121,49 @@
 > **语义**：本模块量化的是预编码器*输出*，对应 UE→BS 的 PMI 反馈（MRT/CJT 等连续预编码）或 fronthaul 系数信令/定点精度（可选场景）。**NN-PMI 默认不套输出量化**——它在基站本地由反馈回来的 Type I PMI 生成、输出无需回传，只作为不量化基准参与对比；如要做 fronthaul 故事，需显式包 `QuantizedFeedback(ste=True)` 并配 `feedback_ste` 训练。
 > Type I 码本本身就是量化预编码（beam 索引 + QPSK 共相位），不做双重包装，作为固定低比特参考。
 
-### 链路级参数
+### 链路级参数（DLModel / ULModel，Sionna Block 风格，`dmimo/model.py`）
 
 | 字段 | 作用 | 使用方 |
 |---|---|---|
-| `rank` | 层数/流数 | 预编码、链路级收发 |
-| `qam_order` | QAM 阶数（4/16/64...） | `LinkLevelDMIMO` |
+| `rank` | 层数/流数（DL）；UL 固定 rank=1 | `DLModel` / `ULModel` |
+| `qam_order` | QAM 阶数（4=QPSK，16=16QAM...） | `DMIMOPhyModel` |
 | `code_rate` | 目标码率 | `TBEncoder` / `LDPC5GEncoder` |
-| `use_channel_estimation` | 是否启用 DMRS + LS 估计 | `LinkLevelDMIMO` |
-| `est_density` | 保留参数，现由 DMRS 导频符号覆盖 | `LinkLevelDMIMO` |
-| `pilot_boost_db` | DMRS 导频能量提升（dB） | `LinkLevelDMIMO` |
-| `n_symbols` | 每 slot OFDM 符号数 | `LinkLevelDMIMO` |
-| `dmrs_symbol` | 前置 DMRS 符号索引 | `LinkLevelDMIMO` |
-| `num_dmrs_symbols` | DMRS 符号数量 | `LinkLevelDMIMO` |
-| `use_crc` | 是否使用 TB CRC 检错 | `LinkLevelDMIMO` |
+| `perfect_csi` | 接收端完美 CSI（真值有效信道）；`false` = DMRS LS 估计（NN 插值） | `DLModel` / `ULModel` |
+| `fft_size` | 全 FFT 子载波数（含 guard/DC），如 76 | `DMIMOPhyModel` 资源栅格、`DMIMOChannel` |
+| `num_guard_carriers` | 左右 guard 子载波数，如 `[5, 6]` | `DMIMOPhyModel` 资源栅格 |
+| `dc_null` | DC 子载波置零 | `DMIMOPhyModel` 资源栅格 |
+| `cyclic_prefix_length` | CP 长度（频域建模仅影响 Eb/N0 折算；`time` 域为预留扩展点） | `DMIMOPhyModel` |
+| `pilot_ofdm_symbol_indices` | DMRS 导频符号索引，如 `[2, 11]`（映射类型 A）；优先于 `dmrs_symbol`+`num_dmrs_symbols` | `DMIMOPhyModel` |
+| `pilot_boost_db` | DMRS 导频能量提升（dB） | `DMIMOPhyModel` |
+| `n_symbols` | 每 slot OFDM 符号数 | `DMIMOPhyModel` |
+| `use_crc` | 是否使用 TB CRC 检错 | `DMIMOPhyModel` |
+| `speed` | UE 速度 m/s（CDL 逐符号信道老化；0=静态） | `DMIMOChannel` |
+| `delay_spread_ns` | CDL/TDL 名义时延扩展 [ns] | `DMIMOChannel` |
+| `combiner` | UL 合并层级：`joint` / `symbol` / `llr`（或 `all`） | `ULModel` |
+| `estimate_errors` | UL 均衡信道是否吸收接收误差（`false` = 用干净信道，悲观） | `ULModel` |
+| `domain` | 建模域：`freq`（本期）；`time` 为预留扩展点 | `DMIMOPhyModel` |
 | `nn_pmi_ckpt` | NN-PMI 模型 checkpoint 路径 | `dmimo_linklevel_cfg.py` |
 
-### SNR 与运行
+> 旧字段 `use_channel_estimation` / `est_density` / `dmrs_symbol` / `num_dmrs_symbols`
+> 由 `perfect_csi` + `pilot_ofdm_symbol_indices` 取代（`est_density` 语义被 Kronecker
+> 导频全子载波覆盖取代）；保留读取以兼容旧 YAML，`pilot_symbols` 属性优先用显式索引。
+
+### SNR / Eb-N0 与运行
 
 | 字段 | 作用 | 使用方 |
 |---|---|---|
-| `snr_db` / `snr_start_db` / `snr_stop_db` / `snr_step_db` | 与通用平台相同，二选一 | `DMIMOConfig.snr_grid` |
-| `num_trials` | 每 SNR 点 TB 数 | 示例脚本 |
-| `num_mc_batches` | 每个 SNR 下跑的蒙特卡洛批次数；总 TB 数 = `num_trials * num_mc_batches` | `LinkLevelDMIMO.evaluate_many` |
+| `snr_db` / `snr_start_db` / `snr_stop_db` / `snr_step_db` | SNR 扫描（系统级 rate 模型用），二选一 | `DMIMOConfig.snr_grid` |
+| `ebno_db` / `ebno_start_db` / `ebno_stop_db` / `ebno_step_db` | Eb/N0 扫描（链路级 BLER 用，默认 -5..19 step 4，示例 Notebook 风格），二选一 | `DMIMOConfig.ebno_grid` → `sim_ber_many` |
+| `num_trials` | 每 MC 批的 TB 数（batch_size） | `sim_ber_many` |
+| `num_mc_batches` | 每 SNR 点 MC 迭代数上限（配合 target-BLER 提前停止） | `sim_ber_many` |
+| `target_bler` | sim_ber 提前停止目标 BLER（默认 1e-3） | `sim_ber_many` |
+| `num_target_block_errors` | sim_ber 提前停止块错误数（默认 1000） | `sim_ber_many` |
 | `device` | `cpu` / `cuda:0` / `auto` | 示例脚本 |
 | `seed` | 随机种子 | 示例脚本 |
+
+> 链路级 BLER 曲线使用 **Eb/N0 轴**（`ebnodb2no` 计入码率/调制/导频/置零开销）；
+> 落盘 CSV/JSON 同时给出每点的 SNR（`1/no`）。同一 SNR 点所有预编码器/合并器
+> 共享同一份信道/比特/噪声（`sim_ber_many` 公平性，满足 AGENTS.md §3）。
 
 ---
 

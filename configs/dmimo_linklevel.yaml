@@ -20,14 +20,8 @@ cal_pha_error: 0.1
 granularity: "SC"          # SC | RB | SC_RB_granular
 subband_size: 12           # CJT 与 NN-PMI 统一预编码粒度（每子带子载波数）
 
-# ---- P3: CSI 反馈量化（none = 理想 CSI 上界；phase/iq = 有限比特反馈）----
-feedback_quant: "none"        # none | phase | iq
-feedback_bits_phase: 4        # phase: 每复系数相位比特（2/3/4/6/8）
-feedback_bits_amp: null       # phase: 振幅比特（null = 保留连续振幅）
-feedback_bits_iq: 4           # iq: 每实/虚部比特
-feedback_ste: false           # 直通估计器（NN-PMI 抗量化训练用）
-feedback_subband_size: null   # null -> 复用 subband_size
-
+# ---- 预编码选择 ----
+precoder: "all"            # mrt | cjt | type1 | all
 rank: 2                    # number of streams (1..4)
 qam_order: 4               # 星座点数：4=QPSK（2 bit/符号）
 code_rate: 0.5
@@ -42,9 +36,6 @@ cyclic_prefix_length: 6    # CP 长度（频域建模仅影响 Eb/N0 折算）
 speed: 0.0                 # UE 速度 m/s（信道老化；0=静态）
 # P2: 5G NR transport-block encoder/decoder with TB CRC error detection
 use_crc: true
-
-precoder: "all"            # mrt | cjt | type1 | all | nn
-nn_pmi_ckpt: "auto"  # auto = 根据场景自动匹配 out/dmimo/model/nn_pmi_mixer_<tag>.pt
 
 # Eb/N0 sweep range (dB) —— 示例 Notebook 风格，默认 -5..19 step 4
 # 用 `ebno_db: [-5, -1, ...]` 显式列表可覆盖自动网格

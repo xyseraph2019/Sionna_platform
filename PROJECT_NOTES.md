@@ -15,10 +15,10 @@
 ## 2. 项目结构约定
 
 - `D:\Platform` 是项目根目录。
-- `sionna5g/`：通用 5G PUSCH 链路级平台。
-- `dmimo/`：DMIMO 下行研究模块。
-- `configs/`：YAML 场景配置。
-- `examples/`：可运行示例。
+- `dmimo/`：DMIMO 链路级模型包（DLModel / ULModel，Sionna Block 风格）。
+- `configs/`：YAML 场景配置（dmimo_linklevel.yaml / dmimo_ul_linklevel.yaml）。
+- `examples/`：可运行示例（三个链路级驱动）。
+- `tutorials/`：Sionna 官方教程 Notebook（phy/sys，参考用）。
 - `out/`：运行输出，默认不纳入版本管理。
 
 ## 3. 配置原则
@@ -26,7 +26,7 @@
 - 每个配置参数必须明确“给谁用”。
 - 不允许“定义了但没接入”的死参数。
 - 新参数需要同步更新：
-  - `dmimo/config.py` 或 `sionna5g/config.py`
+  - `dmimo/config.py`
   - 对应 YAML
   - `CONFIG_REFERENCE.md`
   - 使用该参数的脚本

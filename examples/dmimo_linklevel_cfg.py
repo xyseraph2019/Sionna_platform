@@ -28,19 +28,6 @@ def _stamp(path):
     return f"{root}_{time.strftime('%Y%m%d_%H%M%S')}{ext}"
 
 
-def _auto_nn_pmi_ckpt(c):
-    """Expected NN-PMI checkpoint path for the current scenario."""
-    tag = scenario_tag(
-        c.num_trps, c.rank, c.n_subcarriers, c.qam_order, c.code_rate,
-        c.channel_kind,
-        est=not c.perfect_csi,
-        num_dmrs_symbols=len(c.pilot_symbols),
-        err=c.cal_amp_error is not None or c.cal_pha_error is not None,
-        subband_size=c.subband_size,
-    )
-    return os.path.join(common.ROOT, "out", "dmimo", "model", f"nn_pmi_mixer_{tag}.pt")
-
-
 def _build_model(c, num_trps, with_err, device):
     """Build a DLModel for one link variant (single-TRP / coherent / +errors)."""
     base = dict(num_trps=num_trps,
@@ -68,43 +55,21 @@ def _build_model(c, num_trps, with_err, device):
     return DLModel(**base)
 
 
-def _make_precoders(c, device):
-    """Precoder factories from the config (MRT / CJT / Type I / NN-PMI)."""
+def _make_precoders(c, n_eff, device):
+    """Precoder factories from the config (MRT / CJT / Type I).
+
+    ``n_eff``: number of effective subcarriers (used as the Type I wideband
+    subband size, i.e. one beam + co-phasing over the whole band).
+    """
     precoders = {
         "MRT": lambda: IndependentMRT(rank=c.rank),
         "CJT": lambda: CJTPrecoder(rank=c.rank, subband_size=c.subband_size),
-        "TypeI-wide": lambda: TypeICodebook(rank=c.rank, subband_size=c.n_subcarriers),
+        "TypeI-wide": lambda: TypeICodebook(rank=c.rank, subband_size=n_eff),
     }
-    # NN-PMI (learned subband PMI), auto-matched checkpoint.
-    if c.nn_pmi_ckpt in (None, "", "auto"):
-        c.nn_pmi_ckpt = _auto_nn_pmi_ckpt(c)
-    if c.nn_pmi_ckpt and os.path.exists(c.nn_pmi_ckpt):
-        from dmimo import load_model
-        _nn, _meta = load_model(c.nn_pmi_ckpt, device=device)
-        precoders["NN-PMI"] = lambda: _nn
-        print(f"  loaded NN-PMI: {c.nn_pmi_ckpt} (val_loss={_meta.get('val_loss')})")
-    elif "nn" in c.precoder.lower():
-        print(f"  [warning] NN-PMI requested but checkpoint not found: {c.nn_pmi_ckpt}")
-    # CSI feedback quantization for the continuous precoders (P3).
-    if c.feedback_quant in ("phase", "iq"):
-        from dmimo import QuantizedFeedback, PhaseQuantizer, ScalarQuantizer
-        qz = (PhaseQuantizer(bits_phase=c.feedback_bits_phase,
-                             bits_amp=c.feedback_bits_amp)
-              if c.feedback_quant == "phase"
-              else ScalarQuantizer(bits=c.feedback_bits_iq))
-        fb_sub = c.feedback_subband_size or c.subband_size
-        for name in list(precoders):
-            if "TypeI" in name or "NN" in name:
-                continue
-            precoders[name] = (lambda base=precoders[name]:
-                               QuantizedFeedback(base(), qz, subband_size=fb_sub,
-                                                 ste=c.feedback_ste))
-        print(f"  [feedback] quant={c.feedback_quant} "
-              f"bits={c.feedback_bits_phase or c.feedback_bits_iq} sub={fb_sub}")
     # Selection.
     sel = list(precoders) if c.precoder.lower() == "all" else \
-        [{"mrt": "MRT", "cjt": "CJT", "type1": "TypeI-wide", "typei": "TypeI-wide",
-          "nn": "NN-PMI", "nnpmi": "NN-PMI"}.get(c.precoder.lower(), c.precoder)]
+        [{"mrt": "MRT", "cjt": "CJT", "type1": "TypeI-wide",
+          "typei": "TypeI-wide"}.get(c.precoder.lower(), c.precoder)]
     return {name: precoders[name] for name in sel}
 
 
@@ -118,11 +83,11 @@ def main() -> int:
     dev = "cuda:0" if torch.cuda.is_available() and c.device in ("auto", "cuda:0") \
         else "cpu"
 
-    pcs = _make_precoders(c, dev)
     m1 = _build_model(c, 1, False, dev)
     m0 = _build_model(c, c.num_trps, False, dev)
     me = _build_model(c, c.num_trps, True, dev)
     models = {"singleTRP": m1, "3TRP-coherent": m0, "3TRP+err": me}
+    pcs = _make_precoders(c, me.n_eff, dev)
 
     est = "perfect CSI" if c.perfect_csi else \
         f"LS ({len(c.pilot_symbols)} DMRS symbols)"

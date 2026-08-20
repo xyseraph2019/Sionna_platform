@@ -28,7 +28,7 @@ class Precoder(Protocol):
     ``True`` means the precoder should be computed from the *error-corrupted*
     channel ``h_err`` (the BS observes/compensates timing+calibration errors,
     e.g. CJT), ``False`` means it uses the clean channel (limited feedback, e.g.
-    Type I / NN-PMI whose PMI carries no error information).
+    Type I, whose PMI carries no error information).
     """
 
     def __call__(self, h: torch.Tensor) -> torch.Tensor:
@@ -207,8 +207,8 @@ def type1_wideband_selection(h: torch.Tensor, rank: int = 1, oversmpl: int = 4) 
         c     [B, K, r, D, N]   projections of ``hm`` (pol group 1) on ``Vr``
         hp, hm, P, r, B, K, N, D
 
-    Shared by :class:`TypeICodebook` and the neural subband-PMI precoder
-    (:mod:`dmimo.nn_pmi`) so the wideband PMI semantics stay identical.
+    Shared by :class:`TypeICodebook` so the wideband PMI semantics stay
+    identical.
     """
     B, K, D, total_ant, N = h.shape
     P = total_ant // 2

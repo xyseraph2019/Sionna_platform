@@ -474,7 +474,7 @@ class ULModel(DMIMOPhyModel):
             shadow_fading=shadow_fading, bs_height=bs_height, device=self._device)
         # Receive-side error model: each TRP's receive chain carries its own
         # timing / calibration error (the BS antenna axis plays the "TX" role
-        # of dmimo.errors, as in dmimo.uplink).
+        # of dmimo.errors, mirroring the downlink model).
         self.error = TRPErrorModel(self.rg.subcarrier_spacing, self.n_eff,
                                    tau_seconds, num_tx_ant=self.num_bs_ant,
                                    cal_amp_error=cal_amp_error,

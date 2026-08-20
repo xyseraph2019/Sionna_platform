@@ -21,11 +21,12 @@
 
 ## 3. 仿真公平性
 
-- 对比多个 PMI / 预编码器时，同一 SNR 下必须使用同一份：
+- 对比多个 PMI / 预编码器时，同一 SNR/Eb-N0 下必须使用同一份：
   - 信道
   - 信息比特
   - 噪声/误差
-- 优先使用 `LinkLevelDMIMO.evaluate_many()`，避免每个 precoder 各自独立随机采样。
+- 优先使用 `dmimo.sim.sim_ber_many()`（每个 MC 批只采样一次 channel + bits，
+  所有 precoder / combiner 配置共用），避免每个配置各自独立随机采样。
 
 ## 4. 输出与可观测性
 
